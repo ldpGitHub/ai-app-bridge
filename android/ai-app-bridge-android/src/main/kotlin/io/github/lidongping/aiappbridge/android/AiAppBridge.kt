@@ -639,7 +639,11 @@ object AiAppBridge {
             if (
                 !className.contains("webview") &&
                 !className.contains("smtt") &&
-                !className.contains("x5")
+                !className.contains("x5") &&
+                !className.contains("xwalk") &&
+                !className.contains("crosswalk") &&
+                !className.contains("ucweb") &&
+                !className.contains("nebulauc")
             ) {
                 return false
             }
@@ -1085,10 +1089,17 @@ object AiAppBridge {
                 Bitmap.Config.ARGB_8888,
             )
             val captureStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (screenshotTarget.surfaceView != null) {
+                val pixelCopyResult = if (screenshotTarget.surfaceView != null) {
                     pixelCopySurface(screenshotTarget, bitmap)
                 } else {
                     pixelCopyWindow(screenshotTarget.window, bitmap)
+                }
+                // Fallback to View.draw() if PixelCopy fails (e.g. DRM-protected surfaces,
+                // certain device manufacturers returning ERROR_SOURCE_NO_DATA).
+                if (!pixelCopyResult.optBoolean("ok")) {
+                    drawRootToBitmap(screenshotTarget.root, bitmap)
+                } else {
+                    pixelCopyResult
                 }
             } else {
                 drawRootToBitmap(screenshotTarget.root, bitmap)
@@ -1335,7 +1346,7 @@ object AiAppBridge {
             if (view is TextView) {
                 json.put("text", view.text?.toString()?.take(300) ?: "")
             }
-            if (view is ViewGroup && depth < 16) {
+            if (view is ViewGroup && depth < 24) {
                 val children = JSONArray()
                 for (index in 0 until view.childCount) {
                     children.put(viewToJson(activity, view.getChildAt(index), counter, depth + 1))

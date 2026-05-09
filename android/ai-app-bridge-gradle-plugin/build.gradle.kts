@@ -1,5 +1,6 @@
 plugins {
     `java-gradle-plugin`
+    `maven-publish`
 }
 
 group = "io.github.lidongping.aiappbridge"

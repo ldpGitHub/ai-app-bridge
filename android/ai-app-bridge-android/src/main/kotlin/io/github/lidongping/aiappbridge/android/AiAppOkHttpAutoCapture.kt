@@ -160,7 +160,12 @@ object AiAppOkHttpAutoCapture {
             return null
         }
         return try {
-            val peekBody = invokeMethod(response, "peekBody", maxBodyBytes) ?: return null
+            // peekBody(long) may not exist on OkHttp < 3.12. Gracefully skip response
+            // body capture if the method is not found.
+            val peekBodyMethod = response.javaClass.methods.firstOrNull { method ->
+                method.name == "peekBody" && method.parameterTypes.size == 1
+            } ?: return null
+            val peekBody = peekBodyMethod.invoke(response, maxBodyBytes) ?: return null
             invokeNoArgs(peekBody, "string")?.toString()
         } catch (error: Throwable) {
             "<unavailable: ${error.javaClass.simpleName}>"

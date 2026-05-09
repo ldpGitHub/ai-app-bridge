@@ -1,6 +1,7 @@
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
+    id("maven-publish")
 }
 
 group = "io.github.lidongping.aiappbridge"
@@ -21,6 +22,19 @@ android {
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            create<MavenPublication>("release") {
+                from(components["release"])
+                groupId = "io.github.lidongping.aiappbridge"
+                artifactId = "ai-app-bridge-android"
+                version = "0.1.0-SNAPSHOT"
+            }
+        }
     }
 }
 
