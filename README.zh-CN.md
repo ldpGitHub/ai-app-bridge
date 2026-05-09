@@ -1,6 +1,6 @@
 # AI App Bridge
 
-[English](README.md) | 简体中文
+[English](README.md) | 中文
 
 AI App Bridge 是一个面向 AI 闭环迭代的移动端运行时桥接工具：让 AI agent 能检查正在运行的应用、操作 UI 和 WebView、收集结构化运行时状态、验证结果，并继续迭代改进应用。
 

@@ -1,10 +1,14 @@
 # AI App Bridge
 
-English | [Simplified Chinese](README.zh-CN.md)
+English | [中文](README.zh-CN.md)
 
 AI App Bridge is a runtime bridge for AI agents to close the loop on mobile app iteration: inspect the running app, operate UI and WebView surfaces, collect structured runtime state, verify results, and continue improving the app.
 
 The project is designed for Android and Flutter apps first. The current implementation is debug-only by design, so teams can expose rich runtime control surfaces to local AI agents without shipping them in production builds.
+
+AI App Bridge 是一个面向 AI 闭环迭代的移动端运行时桥接工具：让 AI agent 能检查正在运行的应用、操作 UI 和 WebView、收集结构化运行时状态、验证结果，并继续迭代改进应用。
+
+项目优先支持 Android 和 Flutter。当前实现刻意限定为 debug-only，方便团队在本地把运行时检查和操作能力暴露给 AI agent，同时避免这些能力进入生产包。
 
 ## Why
 
