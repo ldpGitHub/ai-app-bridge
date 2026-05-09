@@ -1,9 +1,11 @@
 # AI App Bridge CLI
 
 ```bash
-node bin/ai-app-bridge.js status --package-name io.github.lidongping.aiappbridge.sample
-node bin/ai-app-bridge.js tree --package-name io.github.lidongping.aiappbridge.sample
-node bin/mcp-server.js
+npm install -g @lidongping/ai-app-bridge
+
+ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge-mcp
 ```
 
 This package has no runtime npm dependencies.

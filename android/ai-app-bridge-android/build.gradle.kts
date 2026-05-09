@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.github.lidongping.aiappbridge"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0"
 
 android {
     namespace = "io.github.lidongping.aiappbridge.android"
@@ -32,7 +32,7 @@ afterEvaluate {
                 from(components["release"])
                 groupId = "io.github.lidongping.aiappbridge"
                 artifactId = "ai-app-bridge-android"
-                version = "0.1.0-SNAPSHOT"
+                version = project.version.toString()
             }
         }
     }

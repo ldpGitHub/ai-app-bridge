@@ -44,23 +44,16 @@ docs                                  设计、集成和测试文档
 
 ## Android 快速接入
 
-本地开发时，先把 Android 产物发布到 Maven local：
-
-```bash
-./gradlew publishToMavenLocal
-```
-
-然后从 `mavenLocal()` 添加 debug-only runtime SDK：
+在业务 App 的 debug 构建里引入 Android runtime SDK：
 
 ```kotlin
 repositories {
-    mavenLocal()
     google()
     mavenCentral()
 }
 
 dependencies {
-    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0-SNAPSHOT")
+    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0")
 }
 ```
 
@@ -70,7 +63,7 @@ Runtime SDK 会通过 init provider 在 debuggable Android 应用中自动启动
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.0-SNAPSHOT"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.0"
 }
 
 aiAppBridge {
@@ -80,14 +73,11 @@ aiAppBridge {
 
 ## Flutter 快速接入
 
-从当前仓库使用 Flutter package：
+在 Flutter 项目里引入插件：
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter:
-    git:
-      url: https://github.com/ldpGitHub/ai-app-bridge.git
-      path: flutter/ai_app_bridge_flutter
+  ai_app_bridge_flutter: ^0.1.0
 ```
 
 初始化一次：
@@ -115,31 +105,26 @@ AiAppBridge.instance.registerH5Adapter(
 ## Desktop CLI / MCP
 
 ```bash
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js status --package-name io.github.lidongping.aiappbridge.sample
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js tree --package-name io.github.lidongping.aiappbridge.sample
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js smoke --package-name io.github.lidongping.aiappbridge.sample
-node desktop/ai-app-bridge-cli/bin/mcp-server.js
+npm install -g @lidongping/ai-app-bridge
+
+ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge smoke --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge-mcp
 ```
 
 如果连接了多个 Android 设备，使用 `--serial <deviceId>` 指定设备。
 
 ## 发布状态
 
-第一版公开版本建议先保持 source-installable 和 MavenLocal 友好，等 API 命名和接入形态稳定后再上正式包仓库。
+README 按正式发布后的使用方式编写：使用者只需要引入对应平台的依赖，不需要 clone 或编译本仓库。
 
-当前状态：
+首发发布目标：
 
-- Android runtime SDK：MavenLocal/SNAPSHOT 可用
-- Gradle plugin：MavenLocal/SNAPSHOT 可用
-- Flutter package：从当前仓库做源码依赖
-- Node CLI / MCP server：从当前仓库源码使用
-
-后续计划：
-
-- GitHub Packages 或 Maven Central
-- Gradle Plugin Portal
-- pub.dev
-- npm
+- Android runtime SDK：Maven Central
+- Gradle plugin：Gradle Plugin Portal
+- Flutter package：pub.dev
+- Node CLI / MCP server：npm
 
 ## 安全边界
 

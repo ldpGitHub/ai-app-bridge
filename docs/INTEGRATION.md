@@ -6,11 +6,9 @@ Add the runtime SDK to debug builds:
 
 ```kotlin
 dependencies {
-    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0-SNAPSHOT")
+    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0")
 }
 ```
-
-During local source development, use a project dependency instead.
 
 The runtime SDK starts automatically in debuggable apps through its init provider. Optional structured records can be emitted from app code:
 
@@ -24,7 +22,7 @@ Optional OkHttp HTTP auto capture is owned by the debug Gradle plugin:
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android")
+    id("io.github.lidongping.aiappbridge.android") version "0.1.0"
 }
 
 aiAppBridge {
@@ -38,10 +36,7 @@ Use the Flutter plugin:
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter:
-    git:
-      url: https://github.com/ldpGitHub/ai-app-bridge.git
-      path: flutter/ai_app_bridge_flutter
+  ai_app_bridge_flutter: ^0.1.0
 ```
 
 Initialize once:
@@ -69,8 +64,10 @@ AiAppBridge.instance.registerH5Adapter(
 ## Desktop / MCP
 
 ```bash
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js status --package-name <android.package>
-node desktop/ai-app-bridge-cli/bin/mcp-server.js
+npm install -g @lidongping/ai-app-bridge
+
+ai-app-bridge status --package-name <android.package>
+ai-app-bridge-mcp
 ```
 
 The desktop tool owns ADB port forwarding, UIAutomator, screenshots, input, permission dialogs, and MCP transport.

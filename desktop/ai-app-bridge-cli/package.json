@@ -1,14 +1,30 @@
 {
   "name": "@lidongping/ai-app-bridge",
   "version": "0.1.0",
-  "private": true,
   "description": "Desktop CLI and MCP server for AI App Bridge.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ldpGitHub/ai-app-bridge.git",
+    "directory": "desktop/ai-app-bridge-cli"
+  },
+  "homepage": "https://github.com/ldpGitHub/ai-app-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/ldpGitHub/ai-app-bridge/issues"
+  },
   "bin": {
     "ai-app-bridge": "bin/ai-app-bridge.js",
     "ai-app-bridge-mcp": "bin/mcp-server.js"
   },
+  "files": [
+    "bin/ai-app-bridge.js",
+    "bin/mcp-server.js",
+    "README.md"
+  ],
   "scripts": {
     "check": "node -c bin/ai-app-bridge.js && node -c bin/mcp-server.js"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
 }

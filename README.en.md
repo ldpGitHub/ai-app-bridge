@@ -42,23 +42,16 @@ docs                                  Design, integration, and test notes
 
 ## Android Quick Start
 
-During local development, publish the Android artifacts to Maven local:
-
-```bash
-./gradlew publishToMavenLocal
-```
-
-Then add the debug-only runtime SDK from `mavenLocal()`:
+Add the Android runtime SDK to debug builds:
 
 ```kotlin
 repositories {
-    mavenLocal()
     google()
     mavenCentral()
 }
 
 dependencies {
-    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0-SNAPSHOT")
+    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0")
 }
 ```
 
@@ -68,7 +61,7 @@ Optional OkHttp auto capture is provided by the debug Gradle plugin:
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.0-SNAPSHOT"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.0"
 }
 
 aiAppBridge {
@@ -78,14 +71,11 @@ aiAppBridge {
 
 ## Flutter Quick Start
 
-Use the Flutter package from this repository:
+Add the Flutter plugin:
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter:
-    git:
-      url: https://github.com/ldpGitHub/ai-app-bridge.git
-      path: flutter/ai_app_bridge_flutter
+  ai_app_bridge_flutter: ^0.1.0
 ```
 
 Initialize once:
@@ -113,31 +103,26 @@ AiAppBridge.instance.registerH5Adapter(
 ## Desktop CLI / MCP
 
 ```bash
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js status --package-name io.github.lidongping.aiappbridge.sample
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js tree --package-name io.github.lidongping.aiappbridge.sample
-node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js smoke --package-name io.github.lidongping.aiappbridge.sample
-node desktop/ai-app-bridge-cli/bin/mcp-server.js
+npm install -g @lidongping/ai-app-bridge
+
+ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge smoke --package-name io.github.lidongping.aiappbridge.sample
+ai-app-bridge-mcp
 ```
 
 Use `--serial <deviceId>` when more than one Android device is connected.
 
 ## Publishing Status
 
-The first public version is intended to stay source-installable and MavenLocal-friendly while the API names and integration shape stabilize.
+The README is written for the normal published-package path: users should only need to add the relevant dependency for their platform, without cloning or compiling this repository.
 
-Current status:
+Initial publishing targets:
 
-- Android runtime SDK: MavenLocal/SNAPSHOT ready
-- Gradle plugin: MavenLocal/SNAPSHOT ready
-- Flutter package: source dependency from this repository
-- Node CLI / MCP server: source usage from this repository
-
-Planned later:
-
-- GitHub Packages or Maven Central
-- Gradle Plugin Portal
-- pub.dev
-- npm
+- Android runtime SDK: Maven Central
+- Gradle plugin: Gradle Plugin Portal
+- Flutter package: pub.dev
+- Node CLI / MCP server: npm
 
 ## Safety Boundary
 
