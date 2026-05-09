@@ -1,0 +1,72 @@
+package io.github.lidongping.aiappbridge.gradle;
+
+import com.android.build.api.instrumentation.FramesComputationMode;
+import com.android.build.api.instrumentation.InstrumentationScope;
+import com.android.build.api.variant.AndroidComponentsExtension;
+import com.android.build.api.variant.Variant;
+import kotlin.Unit;
+import org.gradle.api.Plugin;
+import org.gradle.api.Project;
+import org.gradle.api.Action;
+import org.gradle.api.logging.Logger;
+
+public final class AiAppBridgeGradlePlugin implements Plugin<Project> {
+    @Override
+    public void apply(Project project) {
+        AiAppBridgeExtension extension = project.getExtensions()
+                .create("aiAppBridge", AiAppBridgeExtension.class);
+
+        project.getPlugins().withId("com.android.application", ignored -> {
+            configureAndroidApp(project, extension);
+        });
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void configureAndroidApp(Project project, AiAppBridgeExtension extension) {
+        Logger logger = project.getLogger();
+        AndroidComponentsExtension androidComponents = project.getExtensions()
+                .getByType(AndroidComponentsExtension.class);
+
+        androidComponents.onVariants(
+                androidComponents.selector().all(),
+                (Action<Variant>) variant -> {
+                    if (!variant.getDebuggable()) {
+                        return;
+                    }
+                    if (!extension.isEnabled()) {
+                        logger.lifecycle("[AiAppBridge] Android Gradle plugin disabled for {}.", variant.getName());
+                        return;
+                    }
+
+                    String runtimeDependencyNotation = extension.getRuntimeDependencyNotation().trim();
+                    if (!runtimeDependencyNotation.isEmpty()) {
+                        project.getDependencies().add(variant.getName() + "Implementation", runtimeDependencyNotation);
+                    }
+
+                    if (extension.isOkHttpCaptureEnabled()) {
+                        variant.transformClassesWith(
+                                OkHttpAutoCaptureClassVisitorFactory.class,
+                                InstrumentationScope.ALL,
+                                parameters -> Unit.INSTANCE
+                        );
+                        variant.setAsmFramesComputationMode(FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS);
+                    }
+
+                    logger.lifecycle(
+                            "[AiAppBridge] Android Gradle plugin configured for {}. "
+                                    + "okHttpCaptureEnabled="
+                                    + extension.isOkHttpCaptureEnabled()
+                                    + ", webSocketCaptureEnabled="
+                                    + extension.isWebSocketCaptureEnabled()
+                                    + ", logInstrumentationEnabled="
+                                    + extension.isLogInstrumentationEnabled()
+                                    + ", webViewDebuggingEnabled="
+                                    + extension.isWebViewDebuggingEnabled()
+                                    + ".",
+                            variant.getName()
+                    );
+                }
+        );
+    }
+}
+

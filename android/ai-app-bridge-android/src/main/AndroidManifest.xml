@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider
+            android:name="io.github.lidongping.aiappbridge.android.AiAppBridgeInitProvider"
+            android:authorities="${applicationId}.ai_app_bridge_init"
+            android:exported="false"
+            android:initOrder="100" />
+    </application>
+</manifest>
+

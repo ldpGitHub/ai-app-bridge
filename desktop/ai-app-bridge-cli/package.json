@@ -1,0 +1,14 @@
+{
+  "name": "@lidongping/ai-app-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop CLI and MCP server for AI App Bridge.",
+  "bin": {
+    "ai-app-bridge": "bin/ai-app-bridge.js",
+    "ai-app-bridge-mcp": "bin/mcp-server.js"
+  },
+  "scripts": {
+    "check": "node -c bin/ai-app-bridge.js && node -c bin/mcp-server.js"
+  },
+  "license": "UNLICENSED"
+}

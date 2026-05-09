@@ -1,0 +1,1511 @@
+#!/usr/bin/env node
+
+const { execFile, spawn } = require('child_process');
+const fs = require('fs');
+const http = require('http');
+const path = require('path');
+
+const defaults = {
+  adb: process.env.ADB || 'adb',
+  serial: '',
+  port: 18080,
+  packageName: 'io.github.lidongping.aiappbridge.sample',
+  nativeActivity: '.debugbridge.DebugBridgeNativeTestActivity',
+  flutterActivity: '.MainActivity',
+};
+
+main().catch((error) => {
+  console.error(error.stack || error.message || String(error));
+  process.exitCode = 1;
+});
+
+async function main() {
+  const { command, options } = parseArgs(process.argv.slice(2));
+  const ctx = {
+    adb: options.adb || defaults.adb,
+    serial: options.serial || defaults.serial,
+    port: Number(options.port || defaults.port),
+    packageName: options.packageName || defaults.packageName,
+    nativeActivity: options.nativeActivity || defaults.nativeActivity,
+    flutterActivity: options.flutterActivity || defaults.flutterActivity,
+  };
+
+  const result = await runCommand(command || options.command || 'status', options, ctx);
+  if (Buffer.isBuffer(result)) {
+    process.stdout.write(result);
+    return;
+  }
+  if (typeof result === 'string') {
+    process.stdout.write(result);
+    if (!result.endsWith('\n')) process.stdout.write('\n');
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+async function runCommand(command, options, ctx) {
+  switch (command) {
+    case 'forward':
+      await ensureForward(ctx);
+      return { ok: true, forward: `tcp:${ctx.port} -> device tcp:${ctx.port}` };
+    case 'remove-forward':
+      await adb(ctx, ['forward', '--remove', `tcp:${ctx.port}`]);
+      return { ok: true, removed: `tcp:${ctx.port}` };
+    case 'status':
+      return bridgeGet(ctx, '/v1/status');
+    case 'tree':
+      return bridgeGet(ctx, '/v1/view/tree');
+    case 'flutter-tree': {
+      const status = await bridgeGet(ctx, '/v1/status');
+      return status.flutter?.layout || null;
+    }
+    case 'flutter-nodes':
+      return flutterNodes(ctx);
+    case 'tap-flutter-text':
+      return flutterAction(ctx, { action: 'tapText', text: requiredString(options.targetText, 'targetText') });
+    case 'input-flutter-text':
+      return flutterAction(ctx, {
+        action: 'inputText',
+        text: requiredString(options.text, 'text'),
+        ...(options.tapX && options.tapY ? { x: Number(options.tapX), y: Number(options.tapY) } : {}),
+      });
+    case 'scroll-flutter':
+      return options.targetText
+        ? flutterAction(ctx, { action: 'scrollUntilText', text: options.targetText, maxSwipes: Number(options.maxSwipes || 12) })
+        : flutterAction(ctx, { action: 'scrollBy', delta: Number(options.delta || 420) });
+    case 'flutter-action':
+      return flutterAction(ctx, JSON.parse(requiredString(options.payload, 'payload')));
+    case 'logs':
+      return bridgeGet(ctx, withQuery('/v1/logs', captureQuery(options)));
+    case 'network':
+      return bridgeGet(ctx, withQuery('/v1/network', captureQuery(options)));
+    case 'state':
+      return bridgeGet(ctx, withQuery('/v1/state', captureQuery(options)));
+    case 'events':
+      return bridgeGet(ctx, withQuery('/v1/events', captureQuery(options)));
+    case 'h5-dom':
+      return bridgeGet(ctx, '/v1/h5/dom');
+    case 'h5-eval':
+      return bridgePost(ctx, '/v1/h5/eval', { script: requiredString(options.script, 'script') });
+    case 'h5-click':
+      return h5Click(ctx, options);
+    case 'h5-input':
+      return h5Input(ctx, options);
+    case 'h5-wait':
+      return h5Wait(ctx, options);
+    case 'h5-scroll':
+      return h5Scroll(ctx, options);
+    case 'flutter-h5-dom':
+      return flutterH5Dom(ctx);
+    case 'flutter-h5-eval':
+      return flutterH5Eval(ctx, { script: requiredString(options.script, 'script') });
+    case 'flutter-h5-click':
+      return flutterH5Click(ctx, options);
+    case 'flutter-h5-input':
+      return flutterH5Input(ctx, options);
+    case 'flutter-h5-wait':
+      return flutterH5Wait(ctx, options);
+    case 'flutter-h5-scroll':
+      return flutterH5Scroll(ctx, options);
+    case 'uia-tree':
+      return uiaTree(ctx);
+    case 'screenshot':
+      return screenshot(ctx, options.outFile || path.join(process.cwd(), 'ai_app_bridge_screenshot.png'));
+    case 'tap':
+      return tap(ctx, requiredNumber(options.tapX, 'tapX'), requiredNumber(options.tapY, 'tapY'));
+    case 'tap-text':
+      return tapText(ctx, requiredString(options.targetText, 'targetText'));
+    case 'wait-text':
+      return waitText(ctx, requiredString(options.targetText, 'targetText'), Number(options.timeoutSec || 10));
+    case 'input-text':
+      return inputText(ctx, requiredString(options.text, 'text'));
+    case 'swipe':
+      return swipe(
+        ctx,
+        requiredNumber(options.startX, 'startX'),
+        requiredNumber(options.startY, 'startY'),
+        requiredNumber(options.endX, 'endX'),
+        requiredNumber(options.endY, 'endY'),
+        Number(options.durationMs || 300),
+      );
+    case 'keyevent':
+      return keyevent(ctx, Number(options.keyCode || 4));
+    case 'logcat':
+      return logcat(ctx, options);
+    case 'permission-state':
+      return permissionState(ctx, requiredString(options.permission, 'permission'));
+    case 'permission-grant':
+      return permissionGrant(ctx, requiredString(options.permission, 'permission'));
+    case 'permission-revoke':
+      return permissionRevoke(ctx, requiredString(options.permission, 'permission'));
+    case 'appops-set':
+      return appopsSet(ctx, requiredString(options.op, 'op'), requiredString(options.mode, 'mode'));
+    case 'tap-uia-text':
+      return tapUiaText(ctx, requiredString(options.targetText, 'targetText'), options);
+    case 'permission-dialog':
+      return permissionDialog(ctx, options);
+    case 'launch-native-test':
+      return launchNativeTest(ctx);
+    case 'launch-flutter':
+      return launchFlutter(ctx, options.initialRoute || '');
+    case 'smoke':
+      return smoke(ctx, options);
+    default:
+      throw new Error(`unknown command: ${command}`);
+  }
+}
+
+function parseArgs(argv) {
+  const options = {};
+  let command = '';
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg.startsWith('--') && !command) {
+      command = arg;
+      continue;
+    }
+    if (!arg.startsWith('--')) {
+      continue;
+    }
+    const rawName = arg.slice(2);
+    const name = rawName.replace(/-([a-z])/g, (_, value) => value.toUpperCase());
+    const next = argv[index + 1];
+    if (next === undefined || next.startsWith('--')) {
+      options[name] = true;
+      continue;
+    }
+    options[name] = next;
+    index += 1;
+  }
+  return { command, options };
+}
+
+async function adb(ctx, args, { binary = false } = {}) {
+  const allArgs = [];
+  if (ctx.serial) allArgs.push('-s', ctx.serial);
+  allArgs.push(...args);
+  return new Promise((resolve, reject) => {
+    execFile(ctx.adb, allArgs, {
+      encoding: binary ? 'buffer' : 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = `${error.message}\n${stderr || ''}`;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function adbBinaryToFile(ctx, args, outFile) {
+  const allArgs = [];
+  if (ctx.serial) allArgs.push('-s', ctx.serial);
+  allArgs.push(...args);
+  await fs.promises.mkdir(path.dirname(path.resolve(outFile)), { recursive: true });
+  return new Promise((resolve, reject) => {
+    const child = spawn(ctx.adb, allArgs, { windowsHide: true });
+    const output = fs.createWriteStream(outFile);
+    let stderr = '';
+    child.stdout.pipe(output);
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      output.close(() => {
+        if (code !== 0) {
+          reject(new Error(`adb failed with exit code ${code}: ${stderr}`));
+          return;
+        }
+        resolve(path.resolve(outFile));
+      });
+    });
+  });
+}
+
+async function ensureForward(ctx) {
+  await adb(ctx, ['forward', `tcp:${ctx.port}`, `tcp:${ctx.port}`]);
+}
+
+async function bridgeGet(ctx, requestPath) {
+  await ensureForward(ctx);
+  const body = await httpGet(`http://127.0.0.1:${ctx.port}${requestPath}`);
+  return JSON.parse(body);
+}
+
+async function bridgePost(ctx, requestPath, payload) {
+  await ensureForward(ctx);
+  const body = await httpPost(`http://127.0.0.1:${ctx.port}${requestPath}`, payload);
+  return JSON.parse(body);
+}
+
+function httpGet(url) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { timeout: 10000 }, (response) => {
+      let data = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+      response.on('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`HTTP ${response.statusCode}: ${data}`));
+          return;
+        }
+        resolve(data);
+      });
+    });
+    request.on('timeout', () => {
+      request.destroy(new Error(`HTTP timeout: ${url}`));
+    });
+    request.on('error', reject);
+  });
+}
+
+function httpPost(url, payload) {
+  const body = JSON.stringify(payload || {});
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, {
+      method: 'POST',
+      timeout: 20000,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (response) => {
+      let data = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        data += chunk;
+      });
+      response.on('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`HTTP ${response.statusCode}: ${data}`));
+          return;
+        }
+        resolve(data);
+      });
+    });
+    request.on('timeout', () => {
+      request.destroy(new Error(`HTTP timeout: ${url}`));
+    });
+    request.on('error', reject);
+    request.write(body);
+    request.end();
+  });
+}
+
+function captureQuery(options) {
+  return {
+    sinceId: options.sinceId,
+    sinceMs: options.sinceMs,
+    limit: options.limit,
+  };
+}
+
+function withQuery(requestPath, query) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query || {})) {
+    if (value === undefined || value === null || value === '' || value === false) continue;
+    params.set(key, String(value));
+  }
+  const queryString = params.toString();
+  return queryString ? `${requestPath}?${queryString}` : requestPath;
+}
+
+async function uiaTree(ctx) {
+  const remotePath = '/sdcard/ai_app_window.xml';
+  return retry(async () => {
+    await adb(ctx, ['shell', 'uiautomator', 'dump', remotePath]);
+    return (await adb(ctx, ['exec-out', 'cat', remotePath])).stdout;
+  }, 4, 500);
+}
+
+async function screenshot(ctx, outFile) {
+  const resolvedPath = await adbBinaryToFile(ctx, ['exec-out', 'screencap', '-p'], outFile);
+  const size = pngSize(resolvedPath);
+  return {
+    ok: true,
+    transport: 'adb',
+    mimeType: 'image/png',
+    path: resolvedPath,
+    width: size.width,
+    height: size.height,
+  };
+}
+
+function pngSize(filePath) {
+  const bytes = fs.readFileSync(filePath);
+  if (bytes.length < 24) return { width: 0, height: 0 };
+  return {
+    width: bytes.readUInt32BE(16),
+    height: bytes.readUInt32BE(20),
+  };
+}
+
+async function tap(ctx, x, y) {
+  await adb(ctx, ['shell', 'input', 'tap', String(x), String(y)]);
+  return { ok: true, transport: 'adb', x, y };
+}
+
+async function tapText(ctx, targetText) {
+  const tree = await bridgeGet(ctx, '/v1/view/tree');
+  const node = findNodeByText(tree.root, targetText);
+  if (node?.bounds) {
+    const x = Math.round((node.bounds.left + node.bounds.right) / 2);
+    const y = Math.round((node.bounds.top + node.bounds.bottom) / 2);
+    await tap(ctx, x, y);
+    return { ok: true, transport: 'adb', targetText, source: 'bridge-tree', x, y };
+  }
+
+  const uiaNode = findUiaNodeByText(await uiaTree(ctx), targetText);
+  if (!uiaNode) {
+    throw new Error(`text not found in Android bridge tree or UIAutomator tree: ${targetText}`);
+  }
+  const x = Math.round((uiaNode.left + uiaNode.right) / 2);
+  const y = Math.round((uiaNode.top + uiaNode.bottom) / 2);
+  await tap(ctx, x, y);
+  return { ok: true, transport: 'adb', targetText, source: 'uiautomator', x, y };
+}
+
+function findNodeByText(node, targetText) {
+  if (!node) return null;
+  if (node.text === targetText || node.contentDescription === targetText) return node;
+  for (const child of node.children || []) {
+    const found = findNodeByText(child, targetText);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findUiaNodeByText(xml, targetText) {
+  const escaped = escapeRegExp(targetText);
+  const nodeRegex = /<node\b[^>]*>/g;
+  let match;
+  while ((match = nodeRegex.exec(xml)) !== null) {
+    const nodeXml = match[0];
+    const textMatch = new RegExp(`\\btext="${escaped}"`).test(nodeXml);
+    const descMatch = new RegExp(`\\bcontent-desc="${escaped}"`).test(nodeXml);
+    if (!textMatch && !descMatch) continue;
+    const boundsMatch = /\bbounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeXml);
+    if (!boundsMatch) continue;
+    return {
+      left: Number(boundsMatch[1]),
+      top: Number(boundsMatch[2]),
+      right: Number(boundsMatch[3]),
+      bottom: Number(boundsMatch[4]),
+    };
+  }
+  return null;
+}
+
+async function tapUiaText(ctx, targetText, options = {}) {
+  const node = findUiaNodeByAny(await uiaTree(ctx), {
+    texts: [targetText],
+    exact: booleanOption(options.exact),
+  });
+  if (!node) {
+    throw new Error(`text not found in UIAutomator tree: ${targetText}`);
+  }
+  const x = Math.round((node.left + node.right) / 2);
+  const y = Math.round((node.top + node.bottom) / 2);
+  await tap(ctx, x, y);
+  return { ok: true, transport: 'adb', source: 'uiautomator', targetText, x, y, matched: node.matched };
+}
+
+async function permissionDialog(ctx, options) {
+  const texts = splitCsv(options.targetText || options.buttonText || options.allowText);
+  const resourceIds = splitCsv(options.resourceId || options.resourceIds);
+  const candidates = texts.length ? texts : defaultPermissionAllowTexts();
+  const ids = resourceIds.length ? resourceIds : defaultPermissionAllowResourceIds();
+  const attempts = Number(options.attempts || 8);
+  const intervalMs = Number(options.intervalMs || 500);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const xml = await uiaTree(ctx);
+    const node = findUiaNodeByAny(xml, {
+      resourceIds: ids,
+    }) || findUiaNodeByAny(xml, {
+      texts: candidates,
+      exact: booleanOption(options.exact),
+      requireClickable: true,
+    });
+    if (node) {
+      const x = Math.round((node.left + node.right) / 2);
+      const y = Math.round((node.top + node.bottom) / 2);
+      await tap(ctx, x, y);
+      return {
+        ok: true,
+        transport: 'adb',
+        source: 'uiautomator',
+        action: 'permission-dialog',
+        attempt,
+        x,
+        y,
+        matched: node.matched,
+      };
+    }
+    await sleep(intervalMs);
+  }
+  return {
+    ok: false,
+    error: 'permission_dialog_allow_button_not_found',
+    texts: candidates,
+    resourceIds: ids,
+    attempts,
+  };
+}
+
+function findUiaNodeByAny(xml, options) {
+  const texts = (options.texts || []).map(String).filter(Boolean);
+  const resourceIds = (options.resourceIds || []).map(String).filter(Boolean);
+  const exact = Boolean(options.exact);
+  const nodeRegex = /<node\b[^>]*>/g;
+  let match;
+  while ((match = nodeRegex.exec(xml)) !== null) {
+    const nodeXml = match[0];
+    const attrs = {
+      text: xmlUnescape(readXmlAttribute(nodeXml, 'text')),
+      contentDescription: xmlUnescape(readXmlAttribute(nodeXml, 'content-desc')),
+      resourceId: xmlUnescape(readXmlAttribute(nodeXml, 'resource-id')),
+      className: xmlUnescape(readXmlAttribute(nodeXml, 'class')),
+      clickable: readXmlAttribute(nodeXml, 'clickable') === 'true',
+      enabled: readXmlAttribute(nodeXml, 'enabled') !== 'false',
+    };
+    if (options.requireClickable && (!attrs.clickable || !attrs.enabled)) continue;
+    const textMatch = texts.find((target) => {
+      return [attrs.text, attrs.contentDescription].some((value) => {
+        return exact ? value === target : value.includes(target);
+      });
+    });
+    const resourceIdMatch = resourceIds.find((target) => {
+      return exact ? attrs.resourceId === target : attrs.resourceId.includes(target);
+    });
+    if (!textMatch && !resourceIdMatch) continue;
+    const boundsMatch = /\bbounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeXml);
+    if (!boundsMatch) continue;
+    return {
+      left: Number(boundsMatch[1]),
+      top: Number(boundsMatch[2]),
+      right: Number(boundsMatch[3]),
+      bottom: Number(boundsMatch[4]),
+      matched: {
+        text: attrs.text,
+        contentDescription: attrs.contentDescription,
+        resourceId: attrs.resourceId,
+        className: attrs.className,
+        clickable: attrs.clickable,
+        target: textMatch || resourceIdMatch,
+      },
+    };
+  }
+  return null;
+}
+
+function readXmlAttribute(xml, name) {
+  const match = new RegExp(`\\b${escapeRegExp(name)}="([^"]*)"`).exec(xml);
+  return match ? match[1] : '';
+}
+
+function xmlUnescape(value) {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function defaultPermissionAllowTexts() {
+  return [
+    'Allow',
+    'While using the app',
+    'Only this time',
+    '仅在使用该应用时允许',
+    '使用应用时允许',
+    '使用时允许',
+    '仅本次允许',
+    '仅本次使用时允许',
+    '始终允许',
+  ];
+}
+
+function defaultPermissionAllowResourceIds() {
+  return [
+    'permission_allow_button',
+    'permission_allow_foreground_only_button',
+    'permission_allow_one_time_button',
+    'android:id/button1',
+  ];
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function waitText(ctx, targetText, timeoutSec) {
+  const deadline = Date.now() + timeoutSec * 1000;
+  while (Date.now() < deadline) {
+    if (await textPresent(ctx, targetText)) {
+      return { ok: true, targetText, timeoutSec };
+    }
+    await sleep(500);
+  }
+  return { ok: false, error: 'text_not_found', targetText, timeoutSec };
+}
+
+async function flutterNodes(ctx) {
+  const status = await bridgeGet(ctx, '/v1/status');
+  return status.flutter?.layout?.operable || { ok: false, error: 'no_flutter_operable_tree' };
+}
+
+async function flutterAction(ctx, payload) {
+  const result = await bridgePost(ctx, '/v1/flutter/action', payload);
+  return { ...result, transport: 'bridge', source: 'flutter-runtime-action', request: payload };
+}
+
+async function tapFlutterText(ctx, targetText) {
+  const operable = await flutterNodes(ctx);
+  const node = findFlutterNode(operable, targetText, 'tap');
+  if (!node) {
+    throw new Error(`flutter tap node not found: ${targetText}`);
+  }
+  const point = flutterNodePoint(node.tap?.bounds || node.bounds, operable.viewport);
+  await tap(ctx, point.x, point.y);
+  return {
+    ok: true,
+    transport: 'adb',
+    source: 'flutter-operable-tree',
+    targetText,
+    node,
+    x: point.x,
+    y: point.y,
+  };
+}
+
+async function inputFlutterText(ctx, targetText, text) {
+  const operable = await flutterNodes(ctx);
+  const node = findFlutterNode(operable, targetText, 'input');
+  if (!node) {
+    throw new Error(`flutter input node not found: ${targetText}`);
+  }
+  const point = flutterNodePoint(node.input?.bounds || node.bounds, operable.viewport);
+  await tap(ctx, point.x, point.y);
+  await sleep(300);
+  await inputText(ctx, text);
+  return {
+    ok: true,
+    transport: 'adb',
+    source: 'flutter-operable-tree',
+    targetText,
+    text,
+    node,
+    x: point.x,
+    y: point.y,
+  };
+}
+
+async function scrollFlutter(ctx, targetText) {
+  const operable = await flutterNodes(ctx);
+  const node = targetText
+    ? findFlutterNode(operable, targetText, 'scroll')
+    : (operable.nodes || []).find((item) => (item.actions || []).includes('scroll') && item.scroll?.bounds);
+  if (!node) {
+    throw new Error(targetText ? `flutter scroll node not found: ${targetText}` : 'flutter scroll node not found');
+  }
+  const bounds = node.scroll?.bounds || node.bounds;
+  const dpr = Number(operable.viewport?.devicePixelRatio || 1);
+  const x = Math.round(((bounds.left + bounds.right) / 2) * dpr);
+  const startY = Math.round((bounds.bottom - bounds.height * 0.2) * dpr);
+  const endY = Math.round((bounds.top + bounds.height * 0.2) * dpr);
+  await swipe(ctx, x, startY, x, endY, 600);
+  return {
+    ok: true,
+    transport: 'adb',
+    source: 'flutter-operable-tree',
+    targetText,
+    node,
+    startX: x,
+    startY,
+    endX: x,
+    endY,
+  };
+}
+
+function findFlutterNode(operable, targetText, action) {
+  const nodes = Array.isArray(operable?.nodes) ? operable.nodes : [];
+  const candidates = nodes.filter((node) => {
+    const actions = Array.isArray(node.actions) ? node.actions : [];
+    return actions.includes(action) && flutterNodeMatches(node, targetText);
+  });
+  return candidates.find((node) => node.text === targetText || node.value === targetText) || candidates[0] || null;
+}
+
+function flutterNodeMatches(node, targetText) {
+  const text = String(node.text || '');
+  const value = String(node.value || '');
+  return text === targetText || value === targetText || text.includes(targetText) || value.includes(targetText);
+}
+
+function flutterNodePoint(bounds, viewport) {
+  if (!bounds) throw new Error('flutter node has no bounds');
+  const dpr = Number(viewport?.devicePixelRatio || 1);
+  return {
+    x: Math.round(Number(bounds.centerX ?? ((bounds.left + bounds.right) / 2)) * dpr),
+    y: Math.round(Number(bounds.centerY ?? ((bounds.top + bounds.bottom) / 2)) * dpr),
+  };
+}
+
+async function h5Click(ctx, options) {
+  const result = await h5Operation(ctx, 'click', h5TargetOptions(options));
+  assertH5OperationOk(result, 'h5_click_failed');
+  return result;
+}
+
+async function h5Input(ctx, options) {
+  const value = options.value ?? options.inputValue ?? options.text;
+  if (value === undefined || value === null) {
+    throw new Error('missing required option: value');
+  }
+  const result = await h5Operation(ctx, 'input', {
+    ...h5TargetOptions(options),
+    value: String(value),
+  });
+  assertH5OperationOk(result, 'h5_input_failed');
+  return result;
+}
+
+async function h5Scroll(ctx, options) {
+  const result = await h5Operation(ctx, 'scroll', {
+    ...h5TargetOptions(options),
+    deltaX: Number(options.deltaX || 0),
+    deltaY: Number(options.deltaY || options.delta || 480),
+  });
+  assertH5OperationOk(result, 'h5_scroll_failed');
+  return result;
+}
+
+async function h5Wait(ctx, options) {
+  const timeoutSec = Number(options.timeoutSec || 10);
+  const intervalMs = Number(options.intervalMs || 500);
+  const deadline = Date.now() + timeoutSec * 1000;
+  let lastResult = null;
+  while (Date.now() <= deadline) {
+    lastResult = await h5Operation(ctx, 'find', h5TargetOptions(options));
+    if (lastResult.result?.ok) {
+      return { ...lastResult, timeoutSec, intervalMs };
+    }
+    await sleep(intervalMs);
+  }
+  return {
+    ok: false,
+    error: 'h5_target_not_found',
+    timeoutSec,
+    intervalMs,
+    lastResult,
+  };
+}
+
+async function h5Operation(ctx, action, params) {
+  const response = await bridgePost(ctx, '/v1/h5/eval', {
+    script: h5OperationScript(action, params),
+  });
+  return {
+    ...response,
+    transport: 'bridge',
+    source: 'native-webview-eval',
+    action,
+    request: params,
+    result: normalizeH5EvalResult(response.result),
+  };
+}
+
+async function flutterH5Dom(ctx) {
+  const response = await flutterAction(ctx, { action: 'h5Dom' });
+  return { ...response, source: 'flutter-h5-adapter' };
+}
+
+async function flutterH5Eval(ctx, params) {
+  const response = await flutterAction(ctx, { action: 'h5Eval', script: params.script });
+  return { ...response, source: 'flutter-h5-adapter' };
+}
+
+async function flutterH5Click(ctx, options) {
+  const result = await flutterH5Operation(ctx, 'click', h5TargetOptions(options));
+  assertH5OperationOk(result, 'flutter_h5_click_failed');
+  return result;
+}
+
+async function flutterH5Input(ctx, options) {
+  const value = options.value ?? options.inputValue ?? options.text;
+  if (value === undefined || value === null) {
+    throw new Error('missing required option: value');
+  }
+  const result = await flutterH5Operation(ctx, 'input', {
+    ...h5TargetOptions(options),
+    value: String(value),
+  });
+  assertH5OperationOk(result, 'flutter_h5_input_failed');
+  return result;
+}
+
+async function flutterH5Scroll(ctx, options) {
+  const result = await flutterH5Operation(ctx, 'scroll', {
+    ...h5TargetOptions(options),
+    deltaX: Number(options.deltaX || 0),
+    deltaY: Number(options.deltaY || options.delta || 480),
+  });
+  assertH5OperationOk(result, 'flutter_h5_scroll_failed');
+  return result;
+}
+
+async function flutterH5Wait(ctx, options) {
+  const timeoutSec = Number(options.timeoutSec || 10);
+  const intervalMs = Number(options.intervalMs || 500);
+  const deadline = Date.now() + timeoutSec * 1000;
+  let lastResult = null;
+  while (Date.now() <= deadline) {
+    lastResult = await flutterH5Operation(ctx, 'find', h5TargetOptions(options));
+    if (lastResult.result?.ok) {
+      return { ...lastResult, timeoutSec, intervalMs };
+    }
+    await sleep(intervalMs);
+  }
+  return {
+    ok: false,
+    error: 'flutter_h5_target_not_found',
+    timeoutSec,
+    intervalMs,
+    lastResult,
+  };
+}
+
+async function flutterH5Operation(ctx, action, params) {
+  const response = await flutterH5Eval(ctx, {
+    script: h5OperationScript(action, params),
+  });
+  return {
+    ...response,
+    source: 'flutter-h5-adapter',
+    action,
+    request: params,
+    result: normalizeH5EvalResult(response.result),
+  };
+}
+
+function h5TargetOptions(options) {
+  return {
+    selector: options.selector || '',
+    targetText: options.targetText || options.textContains || '',
+    exact: booleanOption(options.exact),
+  };
+}
+
+function booleanOption(value) {
+  if (typeof value === 'boolean') return value;
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+}
+
+function assertH5OperationOk(response, errorName) {
+  if (!response.ok) {
+    throw new Error(`${errorName}: ${response.error || 'bridge_error'}`);
+  }
+  if (!response.result?.ok) {
+    throw new Error(`${errorName}: ${response.result?.error || 'target_not_found'}`);
+  }
+}
+
+function normalizeH5EvalResult(value) {
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch (_) {
+      return { ok: true, value };
+    }
+  }
+  return value || null;
+}
+
+function h5OperationScript(action, params) {
+  const payload = JSON.stringify({ action, ...params });
+  return `
+    (function() {
+      var params = ${payload};
+      function text(value) {
+        return value == null ? '' : String(value);
+      }
+      function cut(value, max) {
+        var raw = text(value);
+        return raw.length > max ? raw.slice(0, max) : raw;
+      }
+      function visible(element) {
+        if (!element) return false;
+        var style = window.getComputedStyle ? window.getComputedStyle(element) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
+        var rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      }
+      function bounds(element) {
+        var rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height
+        };
+      }
+      function label(element) {
+        return [
+          element.innerText,
+          element.value,
+          element.title,
+          element.id,
+          element.name,
+          element.getAttribute('aria-label'),
+          element.getAttribute('placeholder'),
+          element.getAttribute('role')
+        ].map(text).filter(Boolean).join('\\n');
+      }
+      function matchesText(element, targetText) {
+        if (!targetText) return true;
+        var source = label(element);
+        return params.exact ? source === targetText : source.indexOf(targetText) >= 0;
+      }
+      function describe(element) {
+        if (!element) return null;
+        return {
+          tag: text(element.tagName).toLowerCase(),
+          id: text(element.id),
+          name: text(element.getAttribute('name')),
+          type: text(element.getAttribute('type')),
+          role: text(element.getAttribute('role')),
+          ariaLabel: text(element.getAttribute('aria-label')),
+          placeholder: text(element.getAttribute('placeholder')),
+          text: cut(element.innerText || element.value || element.title || element.getAttribute('aria-label'), 500),
+          value: cut(element.value, 500),
+          disabled: !!element.disabled,
+          bounds: bounds(element)
+        };
+      }
+      function findElement() {
+        var selector = text(params.selector);
+        var targetText = text(params.targetText);
+        var candidates = [];
+        if (selector) {
+          candidates = Array.prototype.slice.call(document.querySelectorAll(selector), 0, 200);
+        } else if (targetText) {
+          candidates = Array.prototype.slice.call(document.querySelectorAll('a,button,input,textarea,select,[role],[onclick],[aria-label],[contenteditable="true"]'), 0, 500);
+          if (!candidates.length) {
+            candidates = Array.prototype.slice.call(document.body ? document.body.querySelectorAll('*') : [], 0, 1000);
+          }
+        } else if (document.activeElement) {
+          candidates = [document.activeElement];
+        }
+        var matched = candidates.filter(function(element) {
+          return matchesText(element, targetText);
+        });
+        return matched.find(visible) || matched[0] || null;
+      }
+      function dispatch(element, name) {
+        var event = new Event(name, { bubbles: true, cancelable: true });
+        element.dispatchEvent(event);
+      }
+      function pointer(element, name) {
+        try {
+          element.dispatchEvent(new MouseEvent(name, { bubbles: true, cancelable: true, view: window }));
+        } catch (_) {
+          dispatch(element, name);
+        }
+      }
+      function bodyText() {
+        return cut(document.body && document.body.innerText, 2000);
+      }
+
+      var targetText = text(params.targetText);
+      if (params.action === 'find' && targetText && bodyText().indexOf(targetText) >= 0) {
+        return JSON.stringify({
+          ok: true,
+          action: params.action,
+          matchSource: 'bodyText',
+          bodyText: bodyText(),
+          updatedAtMs: Date.now()
+        });
+      }
+
+      var element = findElement();
+      if (!element) {
+        return JSON.stringify({
+          ok: false,
+          action: params.action,
+          error: 'target_not_found',
+          selector: text(params.selector),
+          targetText: targetText,
+          bodyText: bodyText(),
+          updatedAtMs: Date.now()
+        });
+      }
+
+      if (params.action === 'click') {
+        element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        if (element.focus) element.focus();
+        pointer(element, 'mousedown');
+        pointer(element, 'mouseup');
+        if (element.click) {
+          element.click();
+        } else {
+          pointer(element, 'click');
+        }
+      } else if (params.action === 'input') {
+        element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        if (element.focus) element.focus();
+        if ('value' in element) {
+          element.value = text(params.value);
+        } else if (element.isContentEditable) {
+          element.innerText = text(params.value);
+        } else {
+          return JSON.stringify({
+            ok: false,
+            action: params.action,
+            error: 'target_not_editable',
+            matched: describe(element),
+            updatedAtMs: Date.now()
+          });
+        }
+        dispatch(element, 'input');
+        dispatch(element, 'change');
+      } else if (params.action === 'scroll') {
+        if (params.selector || targetText) {
+          element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        } else {
+          window.scrollBy(Number(params.deltaX || 0), Number(params.deltaY || 0));
+        }
+      }
+
+      return JSON.stringify({
+        ok: true,
+        action: params.action,
+        matched: describe(element),
+        value: cut(element.value, 500),
+        bodyText: bodyText(),
+        scroll: {
+          x: window.scrollX,
+          y: window.scrollY
+        },
+        updatedAtMs: Date.now()
+      });
+    })()
+  `;
+}
+
+async function textPresent(ctx, targetText) {
+  for (const loader of [
+    async () => JSON.stringify(await bridgeGet(ctx, '/v1/status')),
+    async () => JSON.stringify(await bridgeGet(ctx, '/v1/view/tree')),
+    async () => await uiaTree(ctx),
+  ]) {
+    try {
+      const text = await loader();
+      if (text.includes(targetText)) return true;
+    } catch (_) {}
+  }
+  return false;
+}
+
+async function inputText(ctx, text) {
+  await adb(ctx, ['shell', 'input', 'text', text.replace(/ /g, '%s')]);
+  return { ok: true, transport: 'adb', text };
+}
+
+async function swipe(ctx, startX, startY, endX, endY, durationMs) {
+  await adb(ctx, ['shell', 'input', 'swipe', String(startX), String(startY), String(endX), String(endY), String(durationMs)]);
+  return { ok: true, transport: 'adb', startX, startY, endX, endY, durationMs };
+}
+
+async function keyevent(ctx, keyCode) {
+  await adb(ctx, ['shell', 'input', 'keyevent', String(keyCode)]);
+  return { ok: true, transport: 'adb', keyCode };
+}
+
+async function logcat(ctx, options) {
+  const follow = Boolean(options.follow || options.live);
+  const args = ['logcat', '-v', String(options.logcatFormat || options.format || 'threadtime')];
+  if (options.clear || options.clearFirst) {
+    await adb(ctx, ['logcat', '-c']);
+  }
+  if (!follow) {
+    args.push('-d');
+  }
+  const since = options.logcatSince || options.since;
+  if (since) {
+    args.push('-T', String(since));
+  } else if (!follow) {
+    args.push('-t', String(options.logcatLines || options.lines || 200));
+  }
+  if (options.logcatFilter) {
+    args.push(...String(options.logcatFilter).split(',').map((value) => value.trim()).filter(Boolean));
+  }
+  const text = follow
+    ? await adbFollow(ctx, args, Number(options.durationMs || Number(options.durationSec || 5) * 1000))
+    : (await adb(ctx, args)).stdout;
+  const pid = await resolveLogcatPid(ctx, options);
+  return filterLogcat(text, { ...options, pid });
+}
+
+async function permissionState(ctx, permission) {
+  const result = await adb(ctx, ['shell', 'dumpsys', 'package', ctx.packageName]);
+  const pattern = new RegExp(`${escapeRegExp(permission)}:\\s+granted=(true|false)(?:,\\s*flags=\\[([^\\]]*)\\])?`);
+  const match = pattern.exec(result.stdout);
+  if (!match) {
+    return {
+      ok: false,
+      packageName: ctx.packageName,
+      permission,
+      error: 'permission_not_found_in_dumpsys',
+    };
+  }
+  return {
+    ok: true,
+    packageName: ctx.packageName,
+    permission,
+    granted: match[1] === 'true',
+    flags: splitCsv(match[2] || ''),
+  };
+}
+
+async function permissionGrant(ctx, permission) {
+  try {
+    await adb(ctx, ['shell', 'pm', 'grant', ctx.packageName, permission]);
+    return {
+      action: 'grant',
+      ...(await permissionState(ctx, permission)),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      action: 'grant',
+      packageName: ctx.packageName,
+      permission,
+      error: error.message || String(error),
+      state: await safePermissionState(ctx, permission),
+    };
+  }
+}
+
+async function permissionRevoke(ctx, permission) {
+  try {
+    await adb(ctx, ['shell', 'pm', 'revoke', ctx.packageName, permission]);
+    return {
+      action: 'revoke',
+      ...(await permissionState(ctx, permission)),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      action: 'revoke',
+      packageName: ctx.packageName,
+      permission,
+      error: error.message || String(error),
+      state: await safePermissionState(ctx, permission),
+    };
+  }
+}
+
+async function safePermissionState(ctx, permission) {
+  try {
+    return await permissionState(ctx, permission);
+  } catch (error) {
+    return { ok: false, error: error.message || String(error) };
+  }
+}
+
+async function appopsSet(ctx, op, mode) {
+  await adb(ctx, ['shell', 'appops', 'set', ctx.packageName, op, mode]);
+  return {
+    ok: true,
+    packageName: ctx.packageName,
+    op,
+    mode,
+  };
+}
+
+async function resolveLogcatPid(ctx, options) {
+  if (options.pid && options.pid !== true && options.pid !== 'current') {
+    return String(options.pid);
+  }
+  if (options.pid === 'current' || options.appPid || options.packagePid) {
+    try {
+      const result = await adb(ctx, ['shell', 'pidof', '-s', ctx.packageName]);
+      return result.stdout.trim().split(/\s+/).filter(Boolean)[0] || '';
+    } catch (_) {
+      return '';
+    }
+  }
+  return '';
+}
+
+function filterLogcat(text, options) {
+  const tags = splitCsv(options.tag || options.tags);
+  const grep = options.grep ? String(options.grep) : '';
+  const grepCaseSensitive = Boolean(options.grepCaseSensitive);
+  const minLevel = priorityValue(options.level || options.minLevel || '');
+  const pid = options.pid ? String(options.pid) : '';
+  const lines = String(text || '').split(/\r?\n/);
+  const filtered = [];
+  let previousIncluded = false;
+  for (const line of lines) {
+    if (!line) continue;
+    const parsed = parseLogcatLine(line);
+    if (!parsed) {
+      if (previousIncluded) filtered.push(line);
+      continue;
+    }
+    let include = true;
+    if (pid && parsed.pid !== pid) include = false;
+    if (tags.length && !tags.includes(parsed.tag)) include = false;
+    if (minLevel >= 0 && priorityValue(parsed.priority) < minLevel) include = false;
+    if (grep) {
+      include = include && (
+        grepCaseSensitive
+          ? line.includes(grep)
+          : line.toLowerCase().includes(grep.toLowerCase())
+      );
+    }
+    previousIncluded = include;
+    if (include) filtered.push(line);
+  }
+  const limit = Number(options.limitLines || options.outputLines || 0);
+  const result = limit > 0 && filtered.length > limit ? filtered.slice(-limit) : filtered;
+  return result.join('\n');
+}
+
+function parseLogcatLine(line) {
+  const match = /^\d\d-\d\d\s+\d\d:\d\d:\d\d\.\d+\s+(\d+)\s+(\d+)\s+([VDIWEAF])\s+([^:]+):\s?(.*)$/.exec(line);
+  if (!match) return null;
+  return {
+    pid: match[1],
+    tid: match[2],
+    priority: match[3],
+    tag: match[4].trim(),
+    message: match[5],
+  };
+}
+
+function priorityValue(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return { V: 0, D: 1, I: 2, W: 3, E: 4, F: 5, A: 5 }[normalized] ?? -1;
+}
+
+function splitCsv(value) {
+  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function adbFollow(ctx, args, durationMs) {
+  const allArgs = [];
+  if (ctx.serial) allArgs.push('-s', ctx.serial);
+  allArgs.push(...args);
+  const boundedDurationMs = Math.max(500, Math.min(durationMs || 5000, 60000));
+  return new Promise((resolve, reject) => {
+    const child = spawn(ctx.adb, allArgs, { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill();
+    }, boundedDurationMs);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0 && code !== null && stdout.length === 0) {
+        reject(new Error(`adb logcat failed with exit code ${code}: ${stderr}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+async function launchNativeTest(ctx) {
+  const component = `${ctx.packageName}/${ctx.nativeActivity}`;
+  await adb(ctx, ['shell', 'am', 'start', '-n', component]);
+  return { ok: true, transport: 'adb', component };
+}
+
+async function launchFlutter(ctx, initialRoute) {
+  const component = `${ctx.packageName}/${ctx.flutterActivity}`;
+  const args = ['shell', 'am', 'start', '-n', component];
+  if (initialRoute) args.push('-e', 'ai_app_initial_route', initialRoute);
+  await adb(ctx, args);
+  return { ok: true, transport: 'adb', component, initialRoute };
+}
+
+async function smoke(ctx, options) {
+  const summary = {
+    packageName: ctx.packageName,
+    port: ctx.port,
+    native: {},
+    flutter: {},
+  };
+
+  await adb(ctx, ['shell', 'am', 'force-stop', ctx.packageName]);
+  await sleep(700);
+  await launchNativeTest(ctx);
+  await sleep(2000);
+
+  const status = await retry(() => bridgeGet(ctx, '/v1/status'), 10, 500);
+  assert(status.ok, 'bridge status is ok');
+  summary.native.statusOk = true;
+
+  const tree = await bridgeGet(ctx, '/v1/view/tree');
+  assert(tree.ok, 'native tree is ok');
+  assert(findNodeByText(tree.root, 'AiApp Native Bridge Test'), 'native title is visible in SDK tree');
+  assert(findNodeByText(tree.root, 'Native Increment'), 'native increment button is visible in SDK tree');
+  summary.native.sdkTreeNodeCount = tree.nodeCount;
+
+  const uiaXml = await uiaTree(ctx);
+  assert(uiaXml.includes('AiApp Native Bridge Test'), 'uiautomator tree contains native title');
+  summary.native.uiaTreeOk = true;
+
+  const h5Dom = await bridgeGet(ctx, '/v1/h5/dom');
+  assert(h5Dom.ok, 'native WebView DOM endpoint is ok');
+  assert(h5Dom.dom?.bodyText?.includes('H5 DOM snapshot body text'), 'native WebView DOM contains body text');
+  assert((h5Dom.dom?.controlCount || 0) >= 2, 'native WebView DOM contains controls');
+  summary.native.h5DomControlCount = h5Dom.dom.controlCount;
+
+  const h5ClickResult = await h5Click(ctx, { selector: '#native-h5-button' });
+  assert(h5ClickResult.ok, 'native WebView h5-click endpoint is ok');
+  assert(JSON.stringify(h5ClickResult.result).includes('Native H5 clicked'), 'native WebView h5-click changed DOM');
+  const h5WaitResult = await h5Wait(ctx, { targetText: 'Native H5 clicked', timeoutSec: 5 });
+  assert(h5WaitResult.ok, 'native WebView h5-wait observes clicked text');
+  const h5InputResult = await h5Input(ctx, { selector: '#native-h5-input', value: 'ai_app h5 input' });
+  assert(h5InputResult.ok, 'native WebView h5-input endpoint is ok');
+  assert(h5InputResult.result?.value === 'ai_app h5 input', 'native WebView h5-input changed input value');
+  await keyevent(ctx, 111);
+  await sleep(300);
+  const h5ScrollResult = await h5Scroll(ctx, { selector: '#native-h5-input' });
+  assert(h5ScrollResult.ok, 'native WebView h5-scroll endpoint is ok');
+  const h5DomAfterClick = await bridgeGet(ctx, '/v1/h5/dom');
+  assert(JSON.stringify(h5DomAfterClick.dom).includes('Native H5 clicked'), 'native WebView DOM read sees click result');
+  assert(JSON.stringify(h5DomAfterClick.dom).includes('ai_app h5 input'), 'native WebView DOM read sees input result');
+  summary.native.h5ClickOk = true;
+  summary.native.h5InputOk = true;
+  summary.native.h5WaitOk = true;
+  summary.native.h5ScrollOk = true;
+
+  const screenshotPath = options.outFile || path.join(__dirname, 'smoke_screenshot.png');
+  const screenshotResult = await screenshot(ctx, screenshotPath);
+  assert(screenshotResult.width > 0 && screenshotResult.height > 0, 'adb screenshot has size');
+  summary.native.screenshot = {
+    width: screenshotResult.width,
+    height: screenshotResult.height,
+    path: screenshotResult.path,
+  };
+
+  await tapText(ctx, 'Native Increment');
+  await sleep(700);
+  const treeAfterTap = await bridgeGet(ctx, '/v1/view/tree');
+  assert(findNodeByText(treeAfterTap.root, 'Native counter: 1'), 'tap changed native counter');
+  summary.native.tapChangedCounter = true;
+
+  await tapText(ctx, 'native_input');
+  await keyevent(ctx, 123);
+  await inputText(ctx, 'ai_appsmoke');
+  await keyevent(ctx, 111);
+  await sleep(700);
+  const treeAfterInput = await bridgeGet(ctx, '/v1/view/tree');
+  assert(JSON.stringify(treeAfterInput.root).includes('ai_appsmoke'), 'adb input changed native text field');
+  summary.native.inputTextOk = true;
+
+  const eventsBefore = await bridgeGet(ctx, withQuery('/v1/events', { limit: 1 }));
+  const sinceEventId = lastItem(eventsBefore.items)?.id || 0;
+
+  await tapText(ctx, 'Record Log');
+  await sleep(300);
+  await tapText(ctx, 'Record Network');
+  await sleep(300);
+  await tapText(ctx, 'Record State');
+  await sleep(300);
+  await tapText(ctx, 'Record Event');
+  await sleep(300);
+
+  const listTree = await bridgeGet(ctx, '/v1/view/tree');
+  assert(JSON.stringify(listTree.root).includes('Native List Row 24'), 'native long list row is present in bridge tree');
+  summary.native.longListTreeOk = true;
+
+  await tapText(ctx, 'Open Dialog');
+  const dialogWait = await waitText(ctx, 'Native Dialog Title', 8);
+  assert(dialogWait.ok, 'native dialog title appeared');
+  await tapText(ctx, 'DIALOG CONFIRM');
+  await sleep(500);
+
+  const logs = await bridgeGet(ctx, '/v1/logs');
+  const network = await bridgeGet(ctx, '/v1/network');
+  const state = await bridgeGet(ctx, '/v1/state');
+  const events = await bridgeGet(ctx, '/v1/events');
+  assert(JSON.stringify(logs.items).includes('NativeBridgeTest'), 'logs endpoint contains native test entries');
+  assert(JSON.stringify(network.items).includes('https://debug.local/native-test'), 'network endpoint contains native test request');
+  assert(JSON.stringify(state.values).includes('native_test.screen'), 'state endpoint contains native test state');
+  assert(JSON.stringify(events.items).includes('dialog_confirmed'), 'events endpoint contains dialog confirmation');
+  summary.native.dialogOk = true;
+  summary.native.capture = { logs: logs.count, network: network.count, state: state.count, events: events.count };
+
+  const limitedLogs = await bridgeGet(ctx, withQuery('/v1/logs', { limit: 1 }));
+  const eventsSince = await bridgeGet(ctx, withQuery('/v1/events', { sinceId: sinceEventId, limit: 20 }));
+  assert(limitedLogs.count <= 1 && limitedLogs.limit === 1, 'logs endpoint honors limit query');
+  assert(JSON.stringify(eventsSince.items).includes('dialog_confirmed'), 'events endpoint honors sinceId query');
+  summary.native.captureQueryOk = true;
+
+  const microphonePermission = 'android.permission.RECORD_AUDIO';
+  const microphoneBefore = await permissionState(ctx, microphonePermission);
+  if (microphoneBefore.ok && !microphoneBefore.granted) {
+    await tapText(ctx, 'Request Microphone Permission');
+    const permissionResult = await permissionDialog(ctx, {
+      attempts: 10,
+      intervalMs: 500,
+      resourceId: 'permission_allow_one_time_button,permission_allow_foreground_only_button,permission_allow_button',
+    });
+    assert(permissionResult.ok, 'permission dialog allow button was tapped');
+    await sleep(1000);
+    const grantedMicrophone = await permissionState(ctx, microphonePermission);
+    assert(grantedMicrophone.ok && grantedMicrophone.granted, 'microphone permission is granted after dialog handling');
+    summary.native.permissionDialogOk = true;
+    summary.native.permissionState = {
+      permission: microphonePermission,
+      granted: grantedMicrophone.granted,
+      matched: permissionResult.matched,
+    };
+  } else {
+    summary.native.permissionDialogSkipped = microphoneBefore.ok ? 'already_granted' : microphoneBefore.error;
+  }
+
+  let scrolledUiaXml = '';
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    scrolledUiaXml = await uiaTree(ctx);
+    if (scrolledUiaXml.includes('Native List Row 24') || scrolledUiaXml.includes('Finish')) {
+      break;
+    }
+    await swipe(ctx, 540, 2100, 540, 500, 700);
+    await sleep(800);
+  }
+  if (!scrolledUiaXml.includes('Native List Row 24') && !scrolledUiaXml.includes('Finish')) {
+    throw new Error('native list bottom is not visible after repeated swipes');
+  }
+  summary.native.scrollOk = scrolledUiaXml.includes('Native List Row 24') || scrolledUiaXml.includes('Finish');
+
+  let backLeftNative = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await keyevent(ctx, 4);
+    await sleep(700);
+    try {
+      const statusAfterBack = await bridgeGet(ctx, '/v1/status');
+      if (!String(statusAfterBack.activity?.current || '').includes('DebugBridgeNativeTestActivity')) {
+        backLeftNative = true;
+        break;
+      }
+    } catch (_) {
+      backLeftNative = true;
+      break;
+    }
+  }
+  assert(backLeftNative, 'back left native debug activity');
+  summary.native.backOk = true;
+
+  if (!options.skipFlutterLaunch) {
+    await launchFlutter(ctx, '');
+    const flutterStatus = await waitFlutterLayout(ctx, 20);
+    const layout = flutterStatus.flutter?.layout;
+    assert(layout, 'flutter snapshot has layout');
+    assert(layout.widgetDump?.ok === true, 'flutter widget dump is ok');
+    assert(String(layout.widgetDump?.text || '').length > 0, 'flutter widget dump has text');
+    summary.flutter.widgetDumpOk = true;
+    summary.flutter.widgetDumpLength = layout.widgetDump.length;
+
+    await flutterAction(ctx, { action: 'openHarness' });
+    await sleep(1000);
+    const flutterLogsBefore = await bridgeGet(ctx, withQuery('/v1/logs', { limit: 1 }));
+    const flutterNetworkBefore = await bridgeGet(ctx, withQuery('/v1/network', { limit: 1 }));
+    const sinceFlutterLogId = lastItem(flutterLogsBefore.items)?.id || 0;
+    const sinceFlutterNetworkId = lastItem(flutterNetworkBefore.items)?.id || 0;
+
+    await flutterAction(ctx, { action: 'tapText', text: 'Record Auto Log Fixture' });
+    await sleep(800);
+    const flutterAutoLogs = await bridgeGet(ctx, withQuery('/v1/logs', { sinceId: sinceFlutterLogId, limit: 20 }));
+    assert(JSON.stringify(flutterAutoLogs.items).includes('ai_app auto debugPrint fixture'), 'flutter debugPrint auto log is captured');
+    assert(JSON.stringify(flutterAutoLogs.items).includes('ai_app auto flutter error fixture'), 'flutter FlutterError auto log is captured');
+    summary.flutter.autoLogCaptureOk = true;
+
+    await flutterAction(ctx, { action: 'tapText', text: 'Run Dart HttpClient Fixture' });
+    await sleep(1200);
+    const flutterAutoNetwork = await bridgeGet(ctx, withQuery('/v1/network', { sinceId: sinceFlutterNetworkId, limit: 20 }));
+    const flutterAutoNetworkText = JSON.stringify(flutterAutoNetwork.items);
+    assert(flutterAutoNetworkText.includes('flutter-httpclient-auto'), 'flutter HttpClient auto network source is captured');
+    assert(flutterAutoNetworkText.includes('/v1/events'), 'flutter HttpClient auto network URL is captured');
+    assert(flutterAutoNetworkText.includes('dart_httpclient_fixture'), 'flutter HttpClient auto request body is captured');
+    summary.flutter.autoHttpClientCaptureOk = true;
+
+    summary.flutter.h5DomTested = false;
+    summary.flutter.h5DomNote = 'Flutter WebView DOM requires a generic WebView adapter or controller registry, not app-specific route code.';
+  }
+
+  summary.ok = true;
+  return summary;
+}
+
+async function waitFlutterLayout(ctx, attempts) {
+  for (let index = 0; index < attempts; index += 1) {
+    const status = await bridgeGet(ctx, '/v1/status');
+    if (status.flutter?.layout?.widgetDump?.ok === true) {
+      return status;
+    }
+    await sleep(700);
+  }
+  return bridgeGet(ctx, '/v1/status');
+}
+
+async function retry(action, attempts, delayMs) {
+  let lastError;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await action();
+    } catch (error) {
+      lastError = error;
+      await sleep(delayMs);
+    }
+  }
+  throw lastError;
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(`ASSERT FAILED: ${message}`);
+}
+
+function lastItem(items) {
+  return Array.isArray(items) && items.length > 0 ? items[items.length - 1] : null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requiredString(value, name) {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${name} is required`);
+  return value;
+}
+
+function requiredNumber(value, name) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`${name} is required`);
+  return number;
+}
+

@@ -1,0 +1,16 @@
+.gradle/
+.kotlin/
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+node_modules/
+*.iml
+*.log
+*.tmp
+*.png
+*.jpg
+*.jpeg
+*.webp
+local.properties
+GeneratedPluginRegistrant.*

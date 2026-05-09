@@ -1,0 +1,18 @@
+<resources>
+    <item name="ai_app_native_test_root" type="id" />
+    <item name="ai_app_native_test_title" type="id" />
+    <item name="ai_app_native_test_status" type="id" />
+    <item name="ai_app_native_test_input" type="id" />
+    <item name="ai_app_native_test_webview" type="id" />
+    <item name="ai_app_native_test_increment" type="id" />
+    <item name="ai_app_native_test_record_log" type="id" />
+    <item name="ai_app_native_test_record_network" type="id" />
+    <item name="ai_app_native_test_okhttp_auto" type="id" />
+    <item name="ai_app_native_test_okhttp_auto_post" type="id" />
+    <item name="ai_app_native_test_okhttp_auto_error" type="id" />
+    <item name="ai_app_native_test_record_state" type="id" />
+    <item name="ai_app_native_test_request_camera" type="id" />
+    <item name="ai_app_native_test_request_microphone" type="id" />
+    <item name="ai_app_native_test_finish" type="id" />
+</resources>
+
