@@ -46,20 +46,52 @@ docs                                  设计、集成和测试文档
 
 在业务 App 的 debug 构建里引入 Android runtime SDK：
 
-```kotlin
-repositories {
-    google()
-    mavenCentral()
-}
+`settings.gradle.kts`：
 
+```kotlin
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+```
+
+`app/build.gradle.kts`：
+
+```kotlin
 dependencies {
-    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.0")
 }
 ```
 
 Runtime SDK 会通过 init provider 在 debuggable Android 应用中自动启动。
 
 可选的 OkHttp 自动捕获由 debug Gradle 插件提供：
+
+`settings.gradle.kts`：
+
+```kotlin
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven("https://jitpack.io")
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "io.github.lidongping.aiappbridge.android") {
+                useModule("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-gradle-plugin:${requested.version}")
+            }
+        }
+    }
+}
+```
+
+`app/build.gradle.kts`：
 
 ```kotlin
 plugins {
@@ -117,12 +149,15 @@ ai-app-bridge-mcp
 
 ## 发布状态
 
-README 按正式发布后的使用方式编写：使用者只需要引入对应平台的依赖，不需要 clone 或编译本仓库。
+Android 依赖首发走 JitPack：创建 Git tag 后，JitPack 会从 GitHub 拉取源码构建并提供 Maven 依赖。使用者只需要添加 JitPack 仓库并引入依赖，不需要 clone 或编译本仓库。
 
-首发发布目标：
+当前发布路径：
 
-- Android runtime SDK：Maven Central
-- Gradle plugin：Gradle Plugin Portal
+- Android runtime SDK：JitPack
+- Gradle plugin：JitPack
+
+后续独立发布目标：
+
 - Flutter package：pub.dev
 - Node CLI / MCP server：npm
 

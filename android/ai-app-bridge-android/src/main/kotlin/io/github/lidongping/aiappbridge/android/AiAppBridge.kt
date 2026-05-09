@@ -1,5 +1,6 @@
 package io.github.lidongping.aiappbridge.android
 
+import android.annotation.TargetApi
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -1144,6 +1145,7 @@ object AiAppBridge {
             return JSONObject().put("ok", true)
         }
 
+        @TargetApi(Build.VERSION_CODES.O)
         private fun pixelCopySurfaceToBitmap(surfaceView: SurfaceView, bitmap: Bitmap): JSONObject {
             val latch = CountDownLatch(1)
             val result = AtomicReference<Int>()
@@ -1182,6 +1184,7 @@ object AiAppBridge {
             }
         }
 
+        @TargetApi(Build.VERSION_CODES.O)
         private fun pixelCopyWindow(window: Window, bitmap: Bitmap): JSONObject {
             val latch = CountDownLatch(1)
             val result = AtomicReference<Int>()

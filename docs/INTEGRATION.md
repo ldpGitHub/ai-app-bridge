@@ -4,9 +4,24 @@
 
 Add the runtime SDK to debug builds:
 
+`settings.gradle.kts`:
+
+```kotlin
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+```
+
+`app/build.gradle.kts`:
+
 ```kotlin
 dependencies {
-    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.0")
 }
 ```
 
@@ -19,6 +34,28 @@ AiAppBridge.recordEvent("ui", "submit_clicked", null)
 ```
 
 Optional OkHttp HTTP auto capture is owned by the debug Gradle plugin:
+
+`settings.gradle.kts`:
+
+```kotlin
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven("https://jitpack.io")
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "io.github.lidongping.aiappbridge.android") {
+                useModule("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-gradle-plugin:${requested.version}")
+            }
+        }
+    }
+}
+```
+
+`app/build.gradle.kts`:
 
 ```kotlin
 plugins {

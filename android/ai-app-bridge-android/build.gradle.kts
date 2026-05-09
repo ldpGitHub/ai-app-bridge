@@ -7,6 +7,20 @@ plugins {
 group = "io.github.lidongping.aiappbridge"
 version = "0.1.0"
 
+val jitpackGroup = providers.environmentVariable("GROUP").orNull
+val jitpackArtifact = providers.environmentVariable("ARTIFACT").orNull
+val jitpackVersion = providers.environmentVariable("VERSION").orNull
+val publishGroupId = if (
+    providers.environmentVariable("JITPACK").orNull == "true" &&
+    !jitpackGroup.isNullOrBlank() &&
+    !jitpackArtifact.isNullOrBlank()
+) {
+    "$jitpackGroup.$jitpackArtifact"
+} else {
+    project.group.toString()
+}
+val publishVersion = jitpackVersion ?: project.version.toString()
+
 android {
     namespace = "io.github.lidongping.aiappbridge.android"
     compileSdk = 35
@@ -30,9 +44,9 @@ afterEvaluate {
         publications {
             create<MavenPublication>("release") {
                 from(components["release"])
-                groupId = "io.github.lidongping.aiappbridge"
+                groupId = publishGroupId
                 artifactId = "ai-app-bridge-android"
-                version = project.version.toString()
+                version = publishVersion
             }
         }
     }

@@ -3,8 +3,20 @@ plugins {
     `maven-publish`
 }
 
-group = "io.github.lidongping.aiappbridge"
-version = "0.1.0"
+val jitpackGroup = providers.environmentVariable("GROUP").orNull
+val jitpackArtifact = providers.environmentVariable("ARTIFACT").orNull
+val jitpackVersion = providers.environmentVariable("VERSION").orNull
+
+group = if (
+    providers.environmentVariable("JITPACK").orNull == "true" &&
+    !jitpackGroup.isNullOrBlank() &&
+    !jitpackArtifact.isNullOrBlank()
+) {
+    "$jitpackGroup.$jitpackArtifact"
+} else {
+    "io.github.lidongping.aiappbridge"
+}
+version = jitpackVersion ?: "0.1.0"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11

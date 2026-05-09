@@ -44,20 +44,52 @@ docs                                  Design, integration, and test notes
 
 Add the Android runtime SDK to debug builds:
 
-```kotlin
-repositories {
-    google()
-    mavenCentral()
-}
+`settings.gradle.kts`:
 
+```kotlin
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+```
+
+`app/build.gradle.kts`:
+
+```kotlin
 dependencies {
-    debugImplementation("io.github.lidongping.aiappbridge:ai-app-bridge-android:0.1.0")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.0")
 }
 ```
 
 The runtime SDK starts automatically in debuggable Android apps through its init provider.
 
 Optional OkHttp auto capture is provided by the debug Gradle plugin:
+
+`settings.gradle.kts`:
+
+```kotlin
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven("https://jitpack.io")
+    }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "io.github.lidongping.aiappbridge.android") {
+                useModule("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-gradle-plugin:${requested.version}")
+            }
+        }
+    }
+}
+```
+
+`app/build.gradle.kts`:
 
 ```kotlin
 plugins {
@@ -115,12 +147,15 @@ Use `--serial <deviceId>` when more than one Android device is connected.
 
 ## Publishing Status
 
-The README is written for the normal published-package path: users should only need to add the relevant dependency for their platform, without cloning or compiling this repository.
+The first Android dependency release uses JitPack. After a Git tag is created, JitPack checks out the GitHub source, builds it, and serves Maven artifacts. Users only need to add the JitPack repository and the dependency; they do not need to clone or compile this repository.
 
-Initial publishing targets:
+Current publishing path:
 
-- Android runtime SDK: Maven Central
-- Gradle plugin: Gradle Plugin Portal
+- Android runtime SDK: JitPack
+- Gradle plugin: JitPack
+
+Separate publishing targets later:
+
 - Flutter package: pub.dev
 - Node CLI / MCP server: npm
 
