@@ -2,22 +2,23 @@
 
 [English](README.en.md)
 
-AI App Bridge 是一个面向 AI 闭环迭代的移动端运行时桥接工具：让 AI agent 能检查正在运行的应用、操作 UI 和 WebView、收集结构化运行时状态、验证结果，并继续迭代改进应用。
+AI App Bridge 是一个面向 AI 自主运行和闭环迭代的移动端运行时桥接工具。它把正在运行的 Android / Flutter App 暴露成一个可观测、可操作、可验证的环境：AI agent 可以检查当前应用、操作原生 UI 和 WebView、读取 View tree / Widget tree / DOM、收集网络请求与运行日志、判断操作结果，并继续下一轮改进。
 
-项目优先支持 Android 和 Flutter。当前实现刻意限定为 debug-only，方便团队在本地把运行时检查和操作能力暴露给 AI agent，同时避免这些能力进入生产包。
+它的核心目标是让 AI agent 直接基于真实运行结果推进移动端开发：看见当前界面、执行下一步动作、读取动作后的状态变化，再决定下一轮修复或验证。
 
-English summary: AI App Bridge is a runtime bridge for AI agents to inspect, operate, verify, and iterate on Android and Flutter apps. It exposes structured runtime state and control surfaces in debug builds, helping local AI agents close the mobile app iteration loop without shipping these capabilities in production builds.
+English summary: AI App Bridge is a mobile runtime bridge for autonomous AI agents. It lets agents inspect running Android and Flutter apps, operate native UI and WebViews, read view/widget/DOM trees, collect logs and network records, verify runtime results, and keep iterating with real evidence.
 
 ## 为什么需要
 
-只靠截图做自动化很脆弱。真正可用的 AI 编码闭环需要运行时证据：
+只靠截图做自动化很脆弱。真正可用的 AI 自主迭代需要运行时证据和操作通道：
 
 - 当前屏幕是什么？
-- 原生 View、WebView、Flutter Widget 的真实结构是什么？
-- 执行动作后产生了哪些日志、网络记录、状态变化和事件？
-- 修改代码后，应用是否真的进入了预期状态？
+- 原生 View、WebView DOM、Flutter Widget 的真实结构是什么？
+- AI 应该点击哪里、输入什么、滚动到哪里，或在 WebView 中执行什么脚本？
+- 执行动作后产生了哪些网络请求、日志、状态变化和事件？
+- 修改代码或触发操作后，应用是否真的进入了预期状态？
 
-AI App Bridge 提供这些结构化运行时能力，让 AI agent 能更少猜测，完成“检查 -> 操作 -> 验证 -> 继续迭代”的闭环。
+AI App Bridge 提供这些结构化运行时能力，让 AI agent 能按“观察 -> 操作 -> 读取结果 -> 验证 -> 继续迭代”的方式自主推进，而不是在缺少运行证据时猜测。
 
 ## 模块结构
 
@@ -30,17 +31,17 @@ examples/android-native-sample        干净的 Android 示例应用
 docs                                  设计、集成和测试文档
 ```
 
-## 当前能力
+## 为 AI agent 提供的能力
 
 - Android bridge 状态：`127.0.0.1:18080`
-- Android View tree 快照和截图
+- Android View tree、窗口树和截图，用于理解当前 UI
+- 原生 Android UI 点击能力，配合桌面端 ADB / UIAutomator 兜底操作
 - 原生 Android WebView DOM 快照和 JavaScript 执行
-- 日志、网络、状态、事件缓冲区，支持 `sinceId` / `sinceMs` 过滤
-- Flutter widget 快照和运行时动作处理
-- Flutter H5 adapter registry
-- 桌面端 ADB 操作和 UIAutomator 兜底
-- Node CLI 命令面的 MCP 包装
+- Flutter Widget 快照、语义动作信息和运行时动作处理
+- Flutter H5 adapter registry，用于把 Dart 层 WebView 暴露给 AI
+- 日志、网络请求、状态、事件缓冲区，支持 `sinceId` / `sinceMs` 增量读取
 - Debug Gradle 插件中的 OkHttp HTTP 自动捕获能力
+- Node CLI 和 MCP stdio server，让 AI 工具可以通过标准命令面接入这些运行时能力
 
 ## Android 快速接入
 
@@ -63,7 +64,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.0")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.3")
 }
 ```
 
@@ -95,7 +96,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.0"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.3"
 }
 
 aiAppBridge {
@@ -147,25 +148,9 @@ ai-app-bridge-mcp
 
 如果连接了多个 Android 设备，使用 `--serial <deviceId>` 指定设备。
 
-## 发布状态
-
-Android 依赖首发走 JitPack：创建 Git tag 后，JitPack 会从 GitHub 拉取源码构建并提供 Maven 依赖。使用者只需要添加 JitPack 仓库并引入依赖，不需要 clone 或编译本仓库。
-
-当前发布路径：
-
-- Android runtime SDK：JitPack
-- Gradle plugin：JitPack
-
-后续独立发布目标：
-
-- Flutter package：pub.dev
-- Node CLI / MCP server：npm
-
-## 安全边界
+## Debug-only
 
 AI App Bridge 会暴露运行时检查和操作能力，应该只接入 debug 构建。除非你已经针对自己的环境做过明确的安全评审，否则不要把它打进 production/release 包。
-
-这个仓库保持通用化。不要提交公司业务代码、业务包名、内部域名、截图、设备 id、凭据或业务测试数据。
 
 ## License
 

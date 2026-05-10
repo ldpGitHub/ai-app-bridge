@@ -2,20 +2,21 @@
 
 English | [中文](README.md)
 
-AI App Bridge is a runtime bridge for AI agents to close the loop on mobile app iteration: inspect the running app, operate UI and WebView surfaces, collect structured runtime state, verify results, and continue improving the app.
+AI App Bridge is a mobile runtime bridge for autonomous AI agents. It turns a running Android / Flutter app into an observable, operable, and verifiable environment: an AI agent can inspect the current app, operate native UI and WebViews, read View tree / Widget tree / DOM data, collect network requests and logs, verify runtime results, and continue the next iteration.
 
-The project is designed for Android and Flutter apps first. The current implementation is debug-only by design, so teams can expose rich runtime control surfaces to local AI agents without shipping them in production builds.
+Its goal is to let AI agents drive mobile development from real runtime results: observe the current screen, perform the next action, read the resulting state changes, then decide the next fix or verification step.
 
 ## Why
 
-Screenshot-only automation is fragile. A useful AI coding loop needs runtime evidence:
+Screenshot-only automation is fragile. A useful autonomous AI iteration loop needs runtime evidence and operation channels:
 
 - What screen is currently visible?
-- Which native views, WebViews, and Flutter widgets exist?
-- What logs, network records, state changes, and events happened after an action?
-- Did the app actually move into the expected state after the change?
+- What native View, WebView DOM, and Flutter Widget structure exists?
+- Where should the AI tap, what should it type, where should it scroll, or what script should it run inside a WebView?
+- What network requests, logs, state changes, and events happened after an action?
+- Did the app actually move into the expected state after a code change or runtime action?
 
-AI App Bridge provides that structured runtime surface so an AI agent can inspect, act, verify, and iterate with less guesswork.
+AI App Bridge provides that structured runtime surface so an AI agent can observe, act, read results, verify, and keep iterating with less guesswork.
 
 ## Modules
 
@@ -28,17 +29,17 @@ examples/android-native-sample        Clean Android sample app
 docs                                  Design, integration, and test notes
 ```
 
-## Current Capabilities
+## Capabilities For AI Agents
 
 - Android bridge status on `127.0.0.1:18080`
-- Android View tree snapshots and screenshots
+- Android View tree, window tree, and screenshots for understanding the current UI
+- Native Android UI tap support, with desktop-side ADB / UIAutomator fallback operations
 - Native Android WebView DOM snapshots and JavaScript evaluation
-- Logs, network, state, and event buffers with `sinceId` / `sinceMs` filters
-- Flutter widget snapshots and runtime action handling
-- Flutter H5 adapter registry
-- Desktop ADB operations and UIAutomator fallback
-- MCP wrapper over the Node CLI command surface
-- Debug Gradle plugin slice for OkHttp HTTP auto capture
+- Flutter Widget snapshots, semantic action metadata, and runtime action handling
+- Flutter H5 adapter registry for exposing Dart-side WebViews to AI agents
+- Logs, network requests, state records, and event buffers with incremental `sinceId` / `sinceMs` reads
+- Debug Gradle plugin support for OkHttp HTTP auto capture
+- Node CLI and MCP stdio server so AI tools can access these runtime capabilities through a standard command surface
 
 ## Android Quick Start
 
@@ -61,7 +62,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.0")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.3")
 }
 ```
 
@@ -93,7 +94,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.0"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.3"
 }
 
 aiAppBridge {
@@ -145,25 +146,9 @@ ai-app-bridge-mcp
 
 Use `--serial <deviceId>` when more than one Android device is connected.
 
-## Publishing Status
-
-The first Android dependency release uses JitPack. After a Git tag is created, JitPack checks out the GitHub source, builds it, and serves Maven artifacts. Users only need to add the JitPack repository and the dependency; they do not need to clone or compile this repository.
-
-Current publishing path:
-
-- Android runtime SDK: JitPack
-- Gradle plugin: JitPack
-
-Separate publishing targets later:
-
-- Flutter package: pub.dev
-- Node CLI / MCP server: npm
-
-## Safety Boundary
+## Debug-only
 
 AI App Bridge exposes runtime inspection and operation surfaces. It should be wired into debug builds only. Do not ship it in production/release builds unless you have made a deliberate security review for your own environment.
-
-This repository is intentionally generic. Do not add company-specific app code, package names, host names, screenshots, device ids, credentials, or business fixtures.
 
 ## License
 
