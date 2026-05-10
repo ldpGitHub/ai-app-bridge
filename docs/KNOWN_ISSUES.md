@@ -202,3 +202,25 @@ workaround when one exists.
 - Desired fix: `tap-text` should ignore bridge-tree nodes whose center is
   outside the current viewport, or return a warning/failure when the selected
   node is not tappable on screen.
+
+## `status --package-name` can expose a raw socket hang-up before app readiness
+
+- Status: open
+- Found while validating: `C:\project\reader`, post-install bridge readiness
+- Bridge version: desktop CLI `0.1.6`, app bridge `0.1.4`
+- Evidence:
+  - After installing the debug APK and clearing logcat, before explicitly
+    starting Reader, `ai-app-bridge status --package-name com.ldp.reader`
+    failed with the raw Node error `Error: socket hang up`.
+  - Starting the app with
+    `adb shell am start -W -n com.ldp.reader/.ui.activity.MainActivity` and
+    retrying the same status command returned structured JSON with
+    `activity.current=com.ldp.reader.ui.activity.MainActivity`.
+- Impact: agent loops cannot reliably distinguish "target app is not started or
+  bridge is not ready yet" from a real transport failure when the CLI exposes
+  the low-level socket exception directly.
+- Current workaround: explicitly launch the target package/component first, then
+  retry `status` and follow with visible-text or activity assertions.
+- Desired fix: return a structured not-ready/connection-failed result that
+  includes the requested package name, attempted port/source, and a suggested
+  launch-or-retry action instead of surfacing the raw socket error.
