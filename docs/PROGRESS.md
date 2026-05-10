@@ -56,15 +56,66 @@
   The installed app reported bridge `0.1.5`, Flutter app
   `platform_design`, `operableCount=6`, first widget `MyAdaptingApp`, and
   native child `FlutterView`.
-- Observed runtime ports during validation were `18081`, `18082`, and `18083`;
-  desktop tools must keep reading the per-app port file and must not assume
-  `18080`.
-- Next Android compatibility queue: `NewPipe` current, `AntennaPod`,
-  `Now in Android`, `DuckDuckGo Android`, `AnkiDroid`, `Organic Maps`, and
-  `WordPress Android`.
-- Next Flutter compatibility queue: `flutter_inappwebview`,
-  `openfoodfacts/smooth-app`, Flutter `add_to_app`, `put-flutter-to-work`,
+- `NewPipe` current validation completed from official `dev` at `cd171dab5402`:
+  Gradle `9.4.1`, AGP `8.13.2`, Kotlin `2.3.21`, OkHttp `5.3.2`.
+  Minimal debug integration added remote Android runtime `0.1.5` and enabled
+  the debug Gradle plugin's OkHttp capture. `debugRuntimeClasspath` resolved
+  `ai-app-bridge-android:0.1.5`; `:app:assembleDebug` succeeded and executed
+  `:app:transformDebugClassesWithAsm`. The APK installed on device `b46093e6`
+  after switching from adb streaming install to `--no-streaming`; `/v1/status`
+  reported bridge `0.1.5` on port `18084`, `/v1/view/tree` returned the
+  NewPipe home tree, and `/v1/network` returned `13` `okhttp-auto` records with
+  redaction enabled.
+- `AntennaPod` current validation completed from official `develop` at
+  `78594ec`: Gradle `8.13`, AGP `8.11.0`, Kotlin BOM `1.9.24`, OkHttp
+  `4.12.0`. Minimal debug integration added remote Android runtime `0.1.5`
+  and enabled the debug Gradle plugin's OkHttp capture. `freeDebugRuntimeClasspath`
+  resolved `ai-app-bridge-android:0.1.5`; `:app:assembleDebug` succeeded and
+  executed `transformFreeDebugClassesWithAsm` plus `transformPlayDebugClassesWithAsm`.
+  `app-free-debug.apk` installed on device `b46093e6`; `/v1/status` reported
+  bridge `0.1.5` on port `18085`, and `/v1/view/tree` returned the AntennaPod
+  home tree.
+- `Now in Android` current build validation completed from official `main` at
+  `7d45eae`: Gradle `9.4.0`, AGP `9.0.0`, Kotlin `2.3.0`, OkHttp `4.12.0`,
+  Retrofit `2.11.0`. Minimal debug integration added remote Android runtime
+  `0.1.5` and enabled the debug Gradle plugin's OkHttp capture.
+  `demoDebugRuntimeClasspath` resolved `ai-app-bridge-android:0.1.5`;
+  `:app:assembleDemoDebug` succeeded and produced `app-demo-debug.apk`. The
+  APK installed on device `b46093e6`; `/v1/status` reported bridge `0.1.5` on
+  port `18087`, `/v1/view/tree` returned the Compose root, and `/v1/network`
+  returned `6` `okhttp-auto` records with Firebase URL token redaction.
+- `openfoodfacts/smooth-app` current validation is environment-blocked, not
+  bridge-blocked. The official `develop` branch at `4adadbb` was minimally
+  wired with `ai_app_bridge_flutter: ^0.1.5`, JitPack in Android repositories,
+  and `AiAppBridge.instance.initialize(...)` after
+  `WidgetsFlutterBinding.ensureInitialized()`, without a manual host Android
+  runtime dependency. `flutter pub get` fails before Gradle because the app
+  requires Dart `^3.11.5`; the default Flutter is `3.35.8-ohos-0.0.3`
+  with Dart `3.9.2`, and the highest checked local Flutter `3.41.6` still has
+  Dart `3.11.4`.
+- `flutter_inappwebview` Android example validation completed from official
+  `master` at `17527ca`: repository `.fvmrc` expects Flutter `3.38.6`, while
+  the available Flutter was `3.35.8-ohos-0.0.3` with Dart `3.9.2`. The
+  `flutter_inappwebview_android/example` app resolved
+  `ai_app_bridge_flutter: ^0.1.5` from pub.dev, initialized the bridge after
+  `WidgetsFlutterBinding.ensureInitialized()`, and added JitPack to Android
+  repositories without a manual host Android runtime dependency. `flutter pub
+  get`, `flutter analyze --no-pub`, and `flutter build apk --debug` succeeded.
+  `debugRuntimeClasspath` proved `ai-app-bridge-android:0.1.5` came through
+  `project :ai_app_bridge_flutter`. The APK installed on device `b46093e6`;
+  `/v1/status` reported bridge `0.1.5` on port `18086`, with Flutter snapshot
+  data including `MaterialApp`, `MyApp`, `Scaffold`, `PlatformViewLink`, and
+  `AndroidViewSurface`; the operable tree included the title
+  `Official InAppWebView website`.
+- Observed runtime ports during validation were `18081`, `18082`, `18083`,
+  `18084`, `18085`, `18086`, and `18087`; desktop tools must keep reading the
+  per-app port file and must not assume `18080`.
+- Next Android compatibility queue: `DuckDuckGo Android`, `AnkiDroid`,
+  `Organic Maps`, and `WordPress Android`.
+- Next Flutter compatibility queue: Flutter `add_to_app`, `put-flutter-to-work`,
   `AppFlowy`, `LocalSend`, `Hiddify`, and `flutter/gallery`.
+  `openfoodfacts/smooth-app` needs Flutter `3.41.9` or newer before it can be
+  fully validated.
 - Published local Android bridge `0.1.3` with `./gradlew.bat build publishToMavenLocal --no-daemon`.
 - Added multi-window view-tree reporting for PopupWindow/Dialog roots through
   `/v1/view/tree.windows`.
