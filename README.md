@@ -39,10 +39,10 @@ docs                                  设计、集成和测试文档
 
 - 本地 bridge 状态查询：从 `127.0.0.1:18080` 开始自动选择可用端口
 - Android View tree、窗口树和截图
-- 原生 UI 点击，以及桌面端 ADB / UIAutomator 兜底操作
+- 原生/H5 UI 操作，以及桌面端 ADB / UIAutomator 兜底操作
 - 原生 Android WebView DOM 快照和 JavaScript 执行
 - Flutter Widget 快照、语义动作信息和运行时动作处理
-- Flutter H5 adapter registry，把 Dart 层 WebView 暴露给 AI agent
+- Flutter H5 操作和 DOM 快照
 - 日志、网络请求、状态和事件缓冲区，支持 `sinceId` / `sinceMs` 增量读取
 - Debug Gradle 插件支持 OkHttp HTTP 自动捕获
 - Node CLI / MCP stdio server，方便 AI 工具接入运行时能力
