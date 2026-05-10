@@ -84,6 +84,22 @@
   APK installed on device `b46093e6`; `/v1/status` reported bridge `0.1.5` on
   port `18087`, `/v1/view/tree` returned the Compose root, and `/v1/network`
   returned `6` `okhttp-auto` records with Firebase URL token redaction.
+- `Now in Android` deep AI-loop validation completed on device `b46093e6`:
+  the app was deliberately changed across layout, logic, network, and logging.
+  `ForYouScreen` now renders an `AI loop: For You` banner with
+  `Bookmark actions`, `ForYouViewModel` increments that count and logs when a
+  news bookmark changes, and `NetworkModule` adds the debug request header
+  `X-Ai-Loop: nowinandroid` to OkHttp calls. `:app:assembleDemoDebug`
+  succeeded, the APK was installed with `adb install --no-streaming -r -d`,
+  and the app was operated through the human path: dismiss notification
+  permission, select `Headlines`, tap `Done`, then bookmark the first news
+  card. `/v1/view/tree` verified the banner changed from
+  `Bookmark actions: 0` to `Bookmark actions: 1` and the bookmark semantic
+  changed from `Bookmark` to `Unbookmark`. `/v1/network` verified Firebase
+  image requests captured by `okhttp-auto` included `requestHeaders` with
+  `X-Ai-Loop: nowinandroid`. Filtered logcat verified
+  `Added X-Ai-Loop header...`, `X-Ai-Loop: nowinandroid`, and
+  `For You bookmark changed id=2 bookmarked=true`.
 - `openfoodfacts/smooth-app` current validation is environment-blocked, not
   bridge-blocked. The official `develop` branch at `4adadbb` was minimally
   wired with `ai_app_bridge_flutter: ^0.1.5`, JitPack in Android repositories,
@@ -107,6 +123,20 @@
   data including `MaterialApp`, `MyApp`, `Scaffold`, `PlatformViewLink`, and
   `AndroidViewSurface`; the operable tree included the title
   `Official InAppWebView website`.
+- `flutter_inappwebview` Android example deep AI-loop validation completed on
+  device `b46093e6`: the example app was deliberately changed to add an
+  `AI Bridge Closure Probe` screen surface with `AI Bridge Probe Banner`,
+  `AI Bridge Probe idle`, and `Run AI Bridge Probe`, plus bridge log/event/state
+  recording and H5 adapter updates. `flutter analyze --no-pub` and
+  `flutter build apk --debug` succeeded. The APK installed with
+  `adb install --no-streaming -r -d`, the app launched with bridge `0.1.5` on
+  port `18086`, and `/v1/status` initially reported Flutter operable nodes for
+  the probe plus H5 URL `https://inappwebview.dev/`. After tapping
+  `Run AI Bridge Probe`, `/v1/status` reported `capture.logs=2`,
+  `capture.state=1`, and `capture.events=1`; the operable text changed to
+  `AI Bridge Probe tapped 1`; H5 changed to
+  `https://inappwebview.dev/?ai_bridge_probe=1`; and filtered logcat contained
+  `[ai_bridge_probe] tap=1 url=https://inappwebview.dev/?ai_bridge_probe=1`.
 - Observed runtime ports during validation were `18081`, `18082`, `18083`,
   `18084`, `18085`, `18086`, and `18087`; desktop tools must keep reading the
   per-app port file and must not assume `18080`.
