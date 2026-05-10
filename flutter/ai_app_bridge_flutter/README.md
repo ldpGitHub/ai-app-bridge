@@ -6,7 +6,11 @@ Flutter plugin for AI App Bridge. It exposes Flutter widget snapshots, runtime a
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.0
+  ai_app_bridge_flutter:
+    git:
+      url: https://github.com/ldpGitHub/ai-app-bridge.git
+      path: flutter/ai_app_bridge_flutter
+      ref: 0.1.3
 ```
 
 ## Initialize

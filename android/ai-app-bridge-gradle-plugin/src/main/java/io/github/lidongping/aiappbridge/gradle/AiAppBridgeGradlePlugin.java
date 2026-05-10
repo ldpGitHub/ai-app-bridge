@@ -30,7 +30,7 @@ public final class AiAppBridgeGradlePlugin implements Plugin<Project> {
         androidComponents.onVariants(
                 androidComponents.selector().all(),
                 (Action<Variant>) variant -> {
-                    if (!variant.getDebuggable()) {
+                    if (!"debug".equalsIgnoreCase(variant.getBuildType())) {
                         return;
                     }
                     if (!extension.isEnabled()) {

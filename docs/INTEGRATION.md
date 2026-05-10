@@ -8,7 +8,6 @@ Add the runtime SDK to debug builds:
 
 ```kotlin
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
         mavenCentral()
@@ -21,7 +20,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.0")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.3")
 }
 ```
 
@@ -59,7 +58,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.0"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.3"
 }
 
 aiAppBridge {
@@ -73,7 +72,11 @@ Use the Flutter plugin:
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.0
+  ai_app_bridge_flutter:
+    git:
+      url: https://github.com/ldpGitHub/ai-app-bridge.git
+      path: flutter/ai_app_bridge_flutter
+      ref: 0.1.3
 ```
 
 Initialize once:
@@ -101,7 +104,9 @@ AiAppBridge.instance.registerH5Adapter(
 ## Desktop / MCP
 
 ```bash
-npm install -g @lidongping/ai-app-bridge
+git clone https://github.com/ldpGitHub/ai-app-bridge.git
+cd ai-app-bridge/desktop/ai-app-bridge-cli
+npm install -g .
 
 ai-app-bridge status --package-name <android.package>
 ai-app-bridge-mcp

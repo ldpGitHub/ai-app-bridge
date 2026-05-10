@@ -16,7 +16,7 @@ group = if (
 } else {
     "io.github.lidongping.aiappbridge"
 }
-version = jitpackVersion ?: "0.1.1"
+version = jitpackVersion ?: "0.1.3"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -24,7 +24,7 @@ java {
 }
 
 dependencies {
-    implementation("com.android.tools.build:gradle-api:8.9.1")
+    compileOnly("com.android.tools.build:gradle-api:7.4.2")
     implementation("org.ow2.asm:asm:9.7")
 }
 

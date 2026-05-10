@@ -1,7 +1,9 @@
 # AI App Bridge CLI
 
 ```bash
-npm install -g @lidongping/ai-app-bridge
+git clone https://github.com/ldpGitHub/ai-app-bridge.git
+cd ai-app-bridge/desktop/ai-app-bridge-cli
+npm install -g .
 
 ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
 ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample

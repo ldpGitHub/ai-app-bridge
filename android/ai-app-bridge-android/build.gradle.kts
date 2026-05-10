@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.github.lidongping.aiappbridge"
-version = "0.1.1"
+version = "0.1.3"
 
 val jitpackGroup = providers.environmentVariable("GROUP").orNull
 val jitpackArtifact = providers.environmentVariable("ARTIFACT").orNull

@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Rect
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -37,6 +39,8 @@ import java.net.Socket
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
+import java.util.Collections
+import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
@@ -55,6 +59,11 @@ object AiAppBridge {
     private const val maxEventEntries = 300
     private const val maxStateEntries = 200
     private const val maxCapturedBodyChars = 20_000
+    private const val bridgeVersion = "0.1.3"
+    private const val redactedValue = "[redacted]"
+    private val sensitiveKeyPattern = Regex(
+        "(?i)(authorization|cookie|token|accessToken|refreshToken|session|password|passwd|pwd|secret|mobile|phone|smsCode|verifyCode|verificationCode|captcha)",
+    )
     @Volatile
     private var flutterActionHandler: FlutterActionHandler? = null
     private val h5DomSnapshotScript = """
@@ -337,18 +346,19 @@ object AiAppBridge {
     }
 
     private fun recordNetworkPayload(payload: JSONObject, source: String): JSONObject {
-            val event = baseCapture(type = "network", source = source)
-                .put("method", payload.optString("method", "GET"))
-                .put("url", payload.optString("url", ""))
-                .put("statusCode", payload.optInt("statusCode", -1))
-                .put("durationMs", payload.optLong("durationMs", -1L))
-                .put("requestBody", boundedString(jsonStringOrNull(payload, "requestBody")))
-                .put("responseBody", boundedString(jsonStringOrNull(payload, "responseBody")))
+        val event = baseCapture(type = "network", source = source)
+            .put("method", payload.optString("method", "GET"))
+            .put("url", redactUrl(payload.optString("url", "")))
+            .put("statusCode", payload.optInt("statusCode", -1))
+            .put("durationMs", payload.optLong("durationMs", -1L))
+            .put("requestBody", redactedBoundedString(jsonStringOrNull(payload, "requestBody")))
+            .put("responseBody", redactedBoundedString(jsonStringOrNull(payload, "responseBody")))
+            .put("redacted", true)
         if (payload.has("requestHeaders")) {
-            event.put("requestHeaders", payload.opt("requestHeaders"))
+            event.put("requestHeaders", redactJsonValue(payload.opt("requestHeaders")))
         }
         if (payload.has("responseHeaders")) {
-            event.put("responseHeaders", payload.opt("responseHeaders"))
+            event.put("responseHeaders", redactJsonValue(payload.opt("responseHeaders")))
         }
         if (payload.has("error")) {
             event.put("error", payload.opt("error"))
@@ -560,6 +570,99 @@ object AiAppBridge {
         } else {
             value
         }
+    }
+
+    private fun redactedBoundedString(value: String?): Any {
+        val bounded = boundedString(value)
+        if (bounded == JSONObject.NULL) {
+            return bounded
+        }
+        return redactPayloadString(bounded.toString())
+    }
+
+    private fun redactPayloadString(raw: String): String {
+        val parsed = parseOptionalJson(raw)
+        return when (parsed) {
+            is JSONObject -> redactJsonObject(parsed).toString()
+            is JSONArray -> redactJsonArray(parsed).toString()
+            is String -> redactFormPayload(raw)
+            else -> raw
+        }
+    }
+
+    private fun redactUrl(raw: String): String {
+        if (raw.isBlank() || !raw.contains("?")) {
+            return raw
+        }
+        return try {
+            val uri = Uri.parse(raw)
+            val parameterNames = uri.queryParameterNames
+            if (parameterNames.isEmpty()) {
+                return raw
+            }
+            val builder = uri.buildUpon().clearQuery()
+            parameterNames.forEach { name ->
+                val values = uri.getQueryParameters(name)
+                if (values.isEmpty()) {
+                    builder.appendQueryParameter(name, if (isSensitiveKey(name)) redactedValue else "")
+                } else {
+                    values.forEach { value ->
+                        builder.appendQueryParameter(name, if (isSensitiveKey(name)) redactedValue else value)
+                    }
+                }
+            }
+            builder.build().toString()
+        } catch (_: Throwable) {
+            raw
+        }
+    }
+
+    private fun redactFormPayload(raw: String): String {
+        if (!raw.contains("=")) {
+            return raw
+        }
+        return raw.split("&").joinToString("&") { part ->
+            val key = part.substringBefore("=")
+            val value = part.substringAfter("=", "")
+            if (isSensitiveKey(key)) {
+                "$key=$redactedValue"
+            } else {
+                "$key=$value"
+            }
+        }
+    }
+
+    private fun redactJsonValue(value: Any?): Any {
+        return when (value) {
+            null -> JSONObject.NULL
+            JSONObject.NULL -> JSONObject.NULL
+            is JSONObject -> redactJsonObject(value)
+            is JSONArray -> redactJsonArray(value)
+            else -> value
+        }
+    }
+
+    private fun redactJsonObject(source: JSONObject): JSONObject {
+        val target = JSONObject()
+        val keys = source.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = if (isSensitiveKey(key)) redactedValue else redactJsonValue(source.opt(key))
+            target.put(key, value)
+        }
+        return target
+    }
+
+    private fun redactJsonArray(source: JSONArray): JSONArray {
+        val target = JSONArray()
+        for (index in 0 until source.length()) {
+            target.put(redactJsonValue(source.opt(index)))
+        }
+        return target
+    }
+
+    private fun isSensitiveKey(key: String): Boolean {
+        return sensitiveKeyPattern.containsMatchIn(key)
     }
 
     private fun jsonStringOrNull(json: JSONObject, key: String): String? {
@@ -864,7 +967,7 @@ object AiAppBridge {
                     "debugBridge",
                     JSONObject()
                         .put("name", "ai_app_bridge")
-                        .put("version", "0.1.0")
+                        .put("version", bridgeVersion)
                         .put("transport", "http")
                         .put("host", "127.0.0.1")
                         .put("port", port),
@@ -905,10 +1008,25 @@ object AiAppBridge {
                         .put("ok", false)
                         .put("error", "no_decor_view")
                 val counter = NodeCounter()
+                val roots = windowRoots(activity)
+                val windows = JSONArray()
+                roots.forEachIndexed { index, windowRoot ->
+                    windows.put(
+                        JSONObject()
+                            .put("index", index)
+                            .put("type", windowRoot.type)
+                            .put("rootClassName", windowRoot.root.javaClass.name)
+                            .put("activityDecor", windowRoot.activityDecor)
+                            .put("bounds", rectToJson(windowRoot.bounds))
+                            .put("root", viewToJson(activity, windowRoot.root, counter, depth = 0, parentEffectiveVisible = true)),
+                    )
+                }
                 JSONObject()
                     .put("ok", true)
                     .put("activity", activity.javaClass.name)
-                    .put("root", viewToJson(activity, root, counter, depth = 0))
+                    .put("root", viewToJson(activity, root, counter, depth = 0, parentEffectiveVisible = true))
+                    .put("windows", windows)
+                    .put("windowCount", roots.size)
                     .put("nodeCount", counter.count)
                     .put("updatedAtMs", System.currentTimeMillis())
             }
@@ -1261,36 +1379,52 @@ object AiAppBridge {
                     ?: return@runOnMainThread JSONObject()
                         .put("ok", false)
                         .put("error", "no_current_activity")
-                val root = activity.window?.decorView
+                val fallbackRoot = activity.window?.decorView
                     ?: return@runOnMainThread JSONObject()
                         .put("ok", false)
                         .put("error", "no_decor_view")
+                val roots = windowRoots(activity)
+                val target = roots.asReversed().firstOrNull {
+                    it.bounds.contains(x.toInt(), y.toInt()) && it.root.isShown
+                } ?: WindowRoot(
+                    root = fallbackRoot,
+                    bounds = boundsForView(fallbackRoot),
+                    type = "activity",
+                    activityDecor = true,
+                )
+                val localX = x - target.bounds.left
+                val localY = y - target.bounds.top
                 val downTime = SystemClock.uptimeMillis()
                 val eventTime = downTime + 48L
                 val down = MotionEvent.obtain(
                     downTime,
                     downTime,
                     MotionEvent.ACTION_DOWN,
-                    x,
-                    y,
+                    localX,
+                    localY,
                     0,
                 )
                 val up = MotionEvent.obtain(
                     downTime,
                     eventTime,
                     MotionEvent.ACTION_UP,
-                    x,
-                    y,
+                    localX,
+                    localY,
                     0,
                 )
-                val handledDown = root.dispatchTouchEvent(down)
-                val handledUp = root.dispatchTouchEvent(up)
+                val handledDown = target.root.dispatchTouchEvent(down)
+                val handledUp = target.root.dispatchTouchEvent(up)
                 down.recycle()
                 up.recycle()
                 JSONObject()
                     .put("ok", true)
                     .put("x", x.toDouble())
                     .put("y", y.toDouble())
+                    .put("localX", localX.toDouble())
+                    .put("localY", localY.toDouble())
+                    .put("windowType", target.type)
+                    .put("rootClassName", target.root.javaClass.name)
+                    .put("rootBounds", rectToJson(target.bounds))
                     .put("handledDown", handledDown)
                     .put("handledUp", handledUp)
                     .put("updatedAtMs", System.currentTimeMillis())
@@ -1316,10 +1450,17 @@ object AiAppBridge {
             view: View,
             counter: NodeCounter,
             depth: Int,
+            parentEffectiveVisible: Boolean,
         ): JSONObject {
             counter.count += 1
             val location = IntArray(2)
             view.getLocationOnScreen(location)
+            val localVisible = view.visibility == View.VISIBLE
+            val effectiveVisible = parentEffectiveVisible &&
+                localVisible &&
+                view.alpha > 0f &&
+                view.width > 0 &&
+                view.height > 0
             val json = JSONObject()
                 .put("nodeId", counter.count)
                 .put("className", view.javaClass.name)
@@ -1328,7 +1469,9 @@ object AiAppBridge {
                 .put("resourceName", resourceName(activity, view.id))
                 .put("contentDescription", view.contentDescription?.toString() ?: JSONObject.NULL)
                 .put("visibility", visibilityName(view.visibility))
-                .put("visible", view.visibility == View.VISIBLE)
+                .put("localVisible", localVisible)
+                .put("effectiveVisible", effectiveVisible)
+                .put("visible", effectiveVisible)
                 .put("enabled", view.isEnabled)
                 .put("clickable", view.isClickable)
                 .put("longClickable", view.isLongClickable)
@@ -1352,11 +1495,94 @@ object AiAppBridge {
             if (view is ViewGroup && depth < 24) {
                 val children = JSONArray()
                 for (index in 0 until view.childCount) {
-                    children.put(viewToJson(activity, view.getChildAt(index), counter, depth + 1))
+                    children.put(viewToJson(activity, view.getChildAt(index), counter, depth + 1, effectiveVisible))
                 }
                 json.put("children", children)
             }
             return json
+        }
+
+        private fun windowRoots(activity: Activity): List<WindowRoot> {
+            val activityRoot = activity.window?.decorView ?: return emptyList()
+            val roots = mutableListOf<WindowRoot>()
+            val seen = Collections.newSetFromMap(IdentityHashMap<View, Boolean>())
+            reflectWindowRoots().forEach { root ->
+                if (root.width <= 0 || root.height <= 0 || !seen.add(root)) {
+                    return@forEach
+                }
+                roots.add(
+                    WindowRoot(
+                        root = root,
+                        bounds = boundsForView(root),
+                        type = windowRootType(root, root === activityRoot),
+                        activityDecor = root === activityRoot,
+                    ),
+                )
+            }
+            if (seen.add(activityRoot)) {
+                roots.add(
+                    WindowRoot(
+                        root = activityRoot,
+                        bounds = boundsForView(activityRoot),
+                        type = "activity",
+                        activityDecor = true,
+                    ),
+                )
+            }
+            return roots.ifEmpty {
+                listOf(
+                    WindowRoot(
+                        root = activityRoot,
+                        bounds = boundsForView(activityRoot),
+                        type = "activity",
+                        activityDecor = true,
+                    ),
+                )
+            }
+        }
+
+        private fun reflectWindowRoots(): List<View> {
+            return try {
+                val globalClass = Class.forName("android.view.WindowManagerGlobal")
+                val instance = globalClass.getMethod("getInstance").invoke(null)
+                val viewsField = globalClass.getDeclaredField("mViews")
+                viewsField.isAccessible = true
+                when (val rawViews = viewsField.get(instance)) {
+                    is List<*> -> rawViews.filterIsInstance<View>()
+                    is Array<*> -> rawViews.filterIsInstance<View>()
+                    else -> emptyList()
+                }
+            } catch (_: Throwable) {
+                emptyList()
+            }
+        }
+
+        private fun windowRootType(root: View, activityDecor: Boolean): String {
+            if (activityDecor) {
+                return "activity"
+            }
+            val name = root.javaClass.name
+            return when {
+                name.contains("Popup", ignoreCase = true) -> "popup"
+                name.contains("Dialog", ignoreCase = true) -> "dialog"
+                else -> "window"
+            }
+        }
+
+        private fun boundsForView(view: View): Rect {
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            return Rect(location[0], location[1], location[0] + view.width, location[1] + view.height)
+        }
+
+        private fun rectToJson(rect: Rect): JSONObject {
+            return JSONObject()
+                .put("left", rect.left)
+                .put("top", rect.top)
+                .put("right", rect.right)
+                .put("bottom", rect.bottom)
+                .put("width", rect.width())
+                .put("height", rect.height())
         }
 
         private fun findSurfaceView(view: View): SurfaceView? {
@@ -1478,6 +1704,13 @@ object AiAppBridge {
         val surfaceTop: Int,
         val width: Int,
         val height: Int,
+    )
+
+    private data class WindowRoot(
+        val root: View,
+        val bounds: Rect,
+        val type: String,
+        val activityDecor: Boolean,
     )
 
     private class NodeCounter {
