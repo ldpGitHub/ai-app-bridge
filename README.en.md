@@ -148,13 +148,28 @@ AiAppBridge.instance.registerH5Adapter(
 npm install -g @lidongping/ai-app-bridge
 ```
 
-Add this MCP server to your AI agent config:
+Add this MCP server to your AI agent config.
+
+macOS / Linux:
 
 ```json
 {
   "mcpServers": {
     "ai-app-bridge": {
       "command": "ai-app-bridge-mcp"
+    }
+  }
+}
+```
+
+Windows:
+
+```json
+{
+  "mcpServers": {
+    "ai-app-bridge": {
+      "command": "cmd",
+      "args": ["/c", "ai-app-bridge-mcp"]
     }
   }
 }
