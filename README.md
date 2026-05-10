@@ -31,7 +31,7 @@ docs                                  设计、集成和测试文档
 
 ## 核心能力
 
-- 本地 bridge 状态查询：`127.0.0.1:18080`
+- 本地 bridge 状态查询：从 `127.0.0.1:18080` 开始自动选择可用端口
 - Android View tree、窗口树和截图
 - 原生 UI 点击，以及桌面端 ADB / UIAutomator 兜底操作
 - 原生 Android WebView DOM 快照和 JavaScript 执行
@@ -61,7 +61,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.4")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5")
 }
 ```
 
@@ -93,7 +93,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.4"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.5"
 }
 
 aiAppBridge {
@@ -103,19 +103,26 @@ aiAppBridge {
 
 ## Flutter 快速接入
 
-在 Flutter 项目中添加插件：
+Flutter 项目只需要添加 pub 包。插件的 Android debug variant 会自动引入 `ai-app-bridge-android` runtime，用来启动设备内本地 bridge server；release variant 不会自动带入这个 debug runtime。
+
+如果 Android 工程还没有配置 JitPack，需要在仓库配置中加入 `https://jitpack.io`。然后添加 Flutter 插件：
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.4
+  ai_app_bridge_flutter: ^0.1.5
 ```
 
 初始化一次：
 
 ```dart
 import 'package:ai_app_bridge_flutter/ai_app_bridge_flutter.dart';
+import 'package:flutter/widgets.dart';
 
-AiAppBridge.instance.initialize(appName: 'sample_app');
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AiAppBridge.instance.initialize(appName: 'sample_app');
+  runApp(const MyApp());
+}
 ```
 
 Flutter WebView DOM 支持需要注册 H5 adapter，因为 WebView controller 在 Dart 层：

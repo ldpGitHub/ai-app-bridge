@@ -4,17 +4,26 @@ Flutter plugin for AI App Bridge. It exposes Flutter widget snapshots, runtime a
 
 ## Install
 
+Add the Flutter package. The plugin's Android debug variant automatically includes the Android runtime that starts the bridge server on the device; the release variant does not include that debug runtime automatically.
+
+If the Android project does not already include JitPack, add `https://jitpack.io` to its repositories.
+
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.4
+  ai_app_bridge_flutter: ^0.1.5
 ```
 
 ## Initialize
 
 ```dart
 import 'package:ai_app_bridge_flutter/ai_app_bridge_flutter.dart';
+import 'package:flutter/widgets.dart';
 
-AiAppBridge.instance.initialize(appName: 'sample_app');
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AiAppBridge.instance.initialize(appName: 'sample_app');
+  runApp(const MyApp());
+}
 ```
 
 ## WebView Adapter

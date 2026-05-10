@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "io.github.lidongping.aiappbridge"
-version = "0.1.4"
+version = "0.1.5"
 
 val jitpackGroup = providers.environmentVariable("GROUP").orNull
 val jitpackArtifact = providers.environmentVariable("ARTIFACT").orNull
@@ -26,7 +26,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        minSdk = 23
+        minSdk = 21
     }
 
     compileOptions {

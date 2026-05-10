@@ -1,0 +1,157 @@
+# Known Issues
+
+This file records issues found while using ai-app-bridge as a development loop
+for real Android apps. Keep each item evidence-based and include the current
+workaround when one exists.
+
+## Android runtime 0.1.4 cannot be consumed by minSdk 21 apps
+
+- Status: fixed and locally verified for `0.1.5`, pending remote JitPack release
+- Found while validating: `D:\TestProject\android-architecture-samples`
+- Bridge version: `0.1.4`
+- Evidence:
+  - The app declares `minSdk=21`.
+  - `:app:processDebugMainManifest` failed with
+    `uses-sdk:minSdkVersion 21 cannot be smaller than version 23 declared in library`.
+- Impact: common Android apps that still support API 21 cannot consume the
+  released `0.1.4` runtime dependency.
+- Fix: lowered Android runtime SDK and Flutter wrapper Android `minSdk` from 23
+  to 21.
+- Verification: published the fixed Android artifacts to Maven Local as
+  `0.1.5`, then rebuilt and installed `android-architecture-samples`;
+  `/v1/status` reported bridge `0.1.5`, and `/v1/view/tree` worked.
+- Remaining work: publish a new tag so JitPack consumers can fetch the fixed
+  artifact remotely.
+
+## Flutter pub package 0.1.4 still requires a manual Android runtime dependency
+
+- Status: fixed and locally verified for `0.1.5`, pending pub.dev release and
+  remote JitPack release
+- Found while validating: `D:\TestProject\flutter-samples\platform_design`
+- Bridge version: Flutter `0.1.4`, Android runtime `0.1.4`
+- Evidence:
+  - Adding only `ai_app_bridge_flutter` did not start an Android bridge server.
+  - Adding `debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.4")`
+    to the host Android app made `/v1/status` and `/v1/view/tree` work.
+- Impact: Flutter users must know an Android implementation detail, and the
+  README can easily drift from the actual pub package behavior.
+- Fix: the Flutter plugin Android module now declares
+  `debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5")`.
+  Kotlin calls stay reflection-based, so release variants can compile without
+  the debug runtime class.
+- Verification: `platform_design` removed the host Android app's manual runtime
+  dependency and used the local Flutter plugin `0.1.5`; debug runtime classpath
+  included `ai-app-bridge-android:0.1.5`, release runtime classpath did not,
+  and the installed app reported bridge `0.1.5` with Flutter widget snapshot
+  and operable node data.
+- Remaining work: publish Android `0.1.5` to JitPack and Flutter `0.1.5` to
+  pub.dev, then repeat the same sample using remote dependencies only.
+
+## Flutter initialization before binding prevents snapshot delivery
+
+- Status: documentation fixed for `0.1.5`
+- Found while validating: `D:\TestProject\flutter-samples\platform_design`
+- Evidence:
+  - The native Android bridge server started and `/v1/status` worked.
+  - `status.flutter` stayed empty until `WidgetsFlutterBinding.ensureInitialized()`
+    was called before `AiAppBridge.instance.initialize(...)`.
+- Impact: Flutter apps can appear connected at the native layer while widget
+  snapshot data is missing.
+- Fix: all Flutter quick-start snippets now call
+  `WidgetsFlutterBinding.ensureInitialized()` before bridge initialization.
+
+## Flutter package SDK constraint is narrower than the implementation requires
+
+- Status: fixed in source for `0.1.5`, pending pub.dev release
+- Found while reviewing package metadata during Flutter sample validation
+- Bridge version: Flutter `0.1.4`
+- Evidence: `pubspec.yaml` required Dart `^3.9.2`, while the integration docs
+  describe Flutter 3.10+ / Dart 3.0+ as the intended compatibility floor.
+- Impact: Flutter 3.x projects on older stable channels can be rejected by
+  `flutter pub get` before any real runtime compatibility check.
+- Fix: changed the package constraint to Dart `>=3.0.0 <4.0.0` and Flutter
+  `>=3.10.0`.
+
+## Bridge port is not always 18080
+
+- Status: documented
+- Found while validating: `Jetchat`, `platform_design`, and
+  `android-architecture-samples`
+- Evidence: the three running apps reported bridge ports `18081`, `18082`, and
+  `18083`.
+- Impact: tools or docs that assume `127.0.0.1:18080` can report false
+  negatives when another bridged app already owns that port.
+- Current behavior: the runtime tries ports from 18080 upward, and the desktop
+  CLI reads the per-app port file through ADB.
+- Desired rule: user-facing docs should describe `18080` as the first attempted
+  port, not a fixed endpoint.
+
+## Android PopupWindow is not included in `/v1/view/tree`
+
+- Status: fixed in `0.1.3`
+- Found while validating: `C:\project\reader`, home overflow menu
+- Bridge version: `0.1.2`; fix version: `0.1.3`
+- Evidence:
+  - The overflow menu was visible in a device screenshot.
+  - `/v1/view/tree` still returned only the Activity decor tree and did not
+    include menu rows such as login, sync, scan, feedback, or settings.
+  - `/v1/action/tap` on a visible menu row fell through to the underlying
+    bookshelf item and opened `ReadActivity`.
+- Likely cause: `/v1/action/tap` dispatches through the current Activity
+  `decorView`, while PopupWindow owns a separate window root.
+- Fix: `/v1/view/tree` now reports a `windows` array collected from Android
+  window roots when reflection is available, and `/v1/action/tap` dispatches
+  through the topmost root that contains the requested screen coordinates.
+- Verified on `C:\project\reader` after installing the `0.1.3` debug build:
+  the home overflow menu appeared as `type=popup`, and tapping the first row
+  returned `windowType=popup` before navigating to `LoginActivity`.
+- Remaining risk: Android hidden-API restrictions may block root reflection on
+  some OS/device builds. Keep the explicit `root` field as the Activity decor
+  compatibility path.
+
+## Hidden child views can appear as visible in `/v1/view/tree`
+
+- Status: fixed in `0.1.3`
+- Found while validating: `C:\project\reader`, login page
+- Bridge version: `0.1.2`; fix version: `0.1.3`
+- Evidence:
+  - On the logged-in login page, the not-login container was hidden.
+  - `/v1/view/tree` still returned text from that hidden branch, for example
+    the login title, with `visible=true` but zero-size bounds.
+- Impact: text-based assertions can pass on content that is not actually
+  visible to the user.
+- Fix: each node now exposes `localVisible`, `effectiveVisible`, and keeps
+  `visible` mapped to effective user-visible state. Zero-size, transparent, or
+  hidden-ancestor nodes are marked not effectively visible.
+
+## Network capture redaction does not cover query/body payloads
+
+- Status: fixed in `0.1.3`
+- Found while validating: `C:\project\reader`, login and bookshelf sync flow
+- Bridge version: `0.1.2`; fix version: `0.1.3`
+- Evidence:
+  - `/v1/network` captures request URL, request body, and response body.
+  - Login/sync requests can include phone numbers or mobile tokens in query or
+    body payloads.
+- Impact: test logs and exported bridge responses can contain user-sensitive
+  data.
+- Fix: network capture now redacts URL query values, JSON body fields, form
+  fields, and header fields whose keys match auth/token/session/password/phone
+  or verification-code style names. Captured network events include
+  `redacted=true`.
+- Remaining risk: free-form text bodies are only redacted when they are JSON or
+  key-value form payloads. Do not treat bridge output as production-grade DLP.
+
+## Launcher ambiguity with debug-only launcher activities
+
+- Status: open
+- Found while validating: `C:\project\reader`
+- Bridge version: `0.1.2`
+- Evidence:
+  - Package-level launcher commands can enter LeakCanary's debug launcher
+    instead of the app splash/main Activity when debug dependencies add their own
+    launcher entry.
+- Workaround: launch the app with an explicit component, such as
+  `com.ldp.reader/.ui.activity.SplashActivity`.
+- Desired fix: if bridge adds app launch helpers, allow explicit component
+  selection and report all launcher candidates before choosing a default.

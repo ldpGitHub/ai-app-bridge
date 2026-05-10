@@ -20,7 +20,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.4")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5")
 }
 ```
 
@@ -58,7 +58,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.4"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.5"
 }
 
 aiAppBridge {
@@ -68,19 +68,26 @@ aiAppBridge {
 
 ## Flutter
 
-Use the Flutter plugin:
+Flutter projects only need the Flutter plugin dependency. The plugin's Android debug variant automatically brings in the Android runtime that starts the in-app bridge server; the release variant does not include that debug runtime automatically.
+
+If the Android project does not already include JitPack, add `https://jitpack.io` to its repositories. Then add the Flutter plugin:
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.4
+  ai_app_bridge_flutter: ^0.1.5
 ```
 
 Initialize once:
 
 ```dart
 import 'package:ai_app_bridge_flutter/ai_app_bridge_flutter.dart';
+import 'package:flutter/widgets.dart';
 
-AiAppBridge.instance.initialize(appName: 'sample_app');
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AiAppBridge.instance.initialize(appName: 'sample_app');
+  runApp(const MyApp());
+}
 ```
 
 Flutter WebView DOM requires a registered H5 adapter because the WebView controller lives in Dart:
@@ -113,7 +120,7 @@ The desktop tool owns ADB port forwarding, UIAutomator, screenshots, input, perm
 ### Android / Native
 - **OkHttp Auto Capture**: The Gradle plugin is compatible with OkHttp 3.12+ and 4.x. For versions below 3.12, the response body may not be fully captured due to API differences. If using R8/ProGuard, ensure OkHttp is kept from obfuscation to maintain reflection compatibility.
 - **WebView Variants**: The bridge automatically recognizes `android.webkit.WebView`, Tencent X5 (`smtt`), UCWeb, and Crosswalk (`xwalk`). For other custom WebView implementations, register a custom `WebViewAdapter`.
-- **Multi-Process Apps**: The bridge HTTP server binds to port 18080 and only initializes on the main app process.
+- **Ports and Multi-Process Apps**: The bridge starts in the main app process and tries ports from 18080 upward. Desktop tools should read the app port file through ADB instead of assuming 18080.
 
 ### Flutter
 - **Flutter SDK Requirements**: The bridge plugin depends on Flutter 3.10+ (Dart 3.0+) to utilize the latest `SemanticsNode` APIs and `rootPipelineOwner`. Older Flutter versions are not supported out of the box.

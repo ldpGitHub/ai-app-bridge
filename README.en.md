@@ -29,7 +29,7 @@ docs                                  Design, integration, and test notes
 
 ## Core Capabilities
 
-- Local bridge status on `127.0.0.1:18080`
+- Local bridge status on the first available port starting at `127.0.0.1:18080`
 - Android View tree, window tree, and screenshots
 - Native UI tap support, with desktop-side ADB / UIAutomator fallback operations
 - Native Android WebView DOM snapshots and JavaScript evaluation
@@ -59,7 +59,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.4")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5")
 }
 ```
 
@@ -91,7 +91,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.4"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.5"
 }
 
 aiAppBridge {
@@ -101,19 +101,26 @@ aiAppBridge {
 
 ## Flutter Quick Start
 
-Add the Flutter plugin:
+Flutter projects only need the pub package. The plugin's Android debug variant automatically includes the `ai-app-bridge-android` runtime that starts the in-app bridge server; the release variant does not include this debug runtime automatically.
+
+If the Android project does not already include JitPack, add `https://jitpack.io` to its repositories. Then add the Flutter plugin:
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.4
+  ai_app_bridge_flutter: ^0.1.5
 ```
 
 Initialize once:
 
 ```dart
 import 'package:ai_app_bridge_flutter/ai_app_bridge_flutter.dart';
+import 'package:flutter/widgets.dart';
 
-AiAppBridge.instance.initialize(appName: 'sample_app');
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AiAppBridge.instance.initialize(appName: 'sample_app');
+  runApp(const MyApp());
+}
 ```
 
 For Flutter WebView DOM support, register an H5 adapter because the WebView controller lives in Dart:

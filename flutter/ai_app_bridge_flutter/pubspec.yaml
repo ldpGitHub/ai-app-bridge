@@ -1,12 +1,12 @@
 name: ai_app_bridge_flutter
 description: Debug-only Flutter bridge for AI app inspection and control.
-version: 0.1.4
+version: 0.1.5
 repository: https://github.com/ldpGitHub/ai-app-bridge
 issue_tracker: https://github.com/ldpGitHub/ai-app-bridge/issues
 
 environment:
-  sdk: ^3.9.2
-  flutter: ">=3.3.0"
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
 
 dependencies:
   flutter:
