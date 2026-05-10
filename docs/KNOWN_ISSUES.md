@@ -181,3 +181,24 @@ workaround when one exists.
 - Desired fix: when `packageName` is supplied, screenshot results should include
   foreground package/activity metadata, and optionally fail or warn when the
   foreground package does not match the requested target.
+
+## `tap-text` can report success for a node outside the tappable viewport
+
+- Status: open
+- Found while validating: `C:\project\reader`, bookshelf entry navigation
+- Bridge version: desktop CLI `0.1.6`, app bridge `0.1.4`
+- Evidence:
+  - `ai-app-bridge tap-text --target-text 一气朝阳 --package-name com.ldp.reader`
+    returned `ok=true`, `source=bridge-tree`, and tap coordinates `x=718`,
+    `y=2810`.
+  - The device viewport reported by the preceding tree/status pass was
+    `1264x2780`, so the selected node center was below the visible screen.
+  - The command did not navigate away from `com.ldp.reader.ui.activity.MainActivity`.
+- Impact: agent flows can believe a tap succeeded even though the target node is
+  clipped/offscreen and Android ignores or misroutes the tap.
+- Current workaround: for navigation-critical assertions, verify the activity or
+  expected visible text after every `tap-text`; prefer UIAutomator-visible taps
+  or explicit coordinates after confirming bounds are inside the viewport.
+- Desired fix: `tap-text` should ignore bridge-tree nodes whose center is
+  outside the current viewport, or return a warning/failure when the selected
+  node is not tappable on screen.
