@@ -158,3 +158,26 @@ workaround when one exists.
   `com.ldp.reader/.ui.activity.SplashActivity`.
 - Desired fix: if bridge adds app launch helpers, allow explicit component
   selection and report all launcher candidates before choosing a default.
+
+## Screenshot capture does not prove the target package is foreground
+
+- Status: open
+- Found while validating: `C:\project\reader`, home/login visual checks
+- Bridge version: desktop CLI `0.1.6`, app bridge `0.1.4`
+- Evidence:
+  - `ai-app-bridge screenshot --package-name com.ldp.reader ...` can still
+    return a valid PNG of the device's current foreground screen.
+  - During reader validation, a screenshot request returned the Android
+    launcher because the device was being used manually between bridge actions.
+  - The command result was structurally successful (`ok=true`, width/height
+    present), so screenshot success alone was not enough to prove the Reader
+    app was visible.
+- Impact: visual validation can falsely pass or fail if a human, launcher,
+  permission surface, or another app takes foreground between `status/tree` and
+  `screenshot`.
+- Current workaround: before screenshots, explicitly bring the app back with a
+  known component or real navigation path, then verify `/v1/status.activity`
+  and/or `/v1/view/tree` contains expected visible nodes.
+- Desired fix: when `packageName` is supplied, screenshot results should include
+  foreground package/activity metadata, and optionally fail or warn when the
+  foreground package does not match the requested target.
