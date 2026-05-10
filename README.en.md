@@ -142,22 +142,22 @@ AiAppBridge.instance.registerH5Adapter(
 );
 ```
 
-## Desktop CLI / MCP
+## Connect an AI Agent
 
 ```bash
 npm install -g @lidongping/ai-app-bridge
-
-ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
-ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
-ai-app-bridge-mcp
 ```
 
-Use `--serial <deviceId>` when more than one Android device is connected.
+Add this MCP server to your AI agent config:
 
-`smoke` is the full self-test command for this repository's sample app. After installing `examples/android-native-sample`, run:
-
-```bash
-ai-app-bridge smoke --package-name io.github.lidongping.aiappbridge.sample
+```json
+{
+  "mcpServers": {
+    "ai-app-bridge": {
+      "command": "ai-app-bridge-mcp"
+    }
+  }
+}
 ```
 
 ## Debug Builds Only

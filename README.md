@@ -145,22 +145,22 @@ AiAppBridge.instance.registerH5Adapter(
 );
 ```
 
-## Desktop CLI / MCP
+## 连接 AI Agent
 
 ```bash
 npm install -g @lidongping/ai-app-bridge
-
-ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
-ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
-ai-app-bridge-mcp
 ```
 
-如果连接了多个 Android 设备，使用 `--serial <deviceId>` 指定设备。
+在你的 AI agent 的 MCP 配置里添加：
 
-`smoke` 是给本仓库 sample app 使用的完整自检命令；安装 `examples/android-native-sample` 后可以运行：
-
-```bash
-ai-app-bridge smoke --package-name io.github.lidongping.aiappbridge.sample
+```json
+{
+  "mcpServers": {
+    "ai-app-bridge": {
+      "command": "ai-app-bridge-mcp"
+    }
+  }
+}
 ```
 
 ## 仅限 debug 构建
