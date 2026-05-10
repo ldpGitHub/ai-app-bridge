@@ -48,6 +48,14 @@
   - `platform_design` removed `mavenLocal()`, rebuilt using the local Flutter
     plugin plus remote JitPack Android runtime, installed, and reported bridge
     `0.1.5` with Flutter widget/operable data.
+- Flutter `ai_app_bridge_flutter` `0.1.5` was published to pub.dev. After
+  pub.dev API and archive download showed `0.1.5`, `platform_design` removed
+  the local path override and resolved `ai_app_bridge_flutter: ^0.1.5` from
+  pub.dev. `flutter pub get`, `flutter analyze --no-pub`, `flutter build apk
+  --debug --no-pub`, install, `/v1/status`, and `/v1/view/tree` all passed.
+  The installed app reported bridge `0.1.5`, Flutter app
+  `platform_design`, `operableCount=6`, first widget `MyAdaptingApp`, and
+  native child `FlutterView`.
 - Observed runtime ports during validation were `18081`, `18082`, and `18083`;
   desktop tools must keep reading the per-app port file and must not assume
   `18080`.

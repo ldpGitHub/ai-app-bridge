@@ -24,8 +24,8 @@ workaround when one exists.
 
 ## Flutter pub package 0.1.4 still requires a manual Android runtime dependency
 
-- Status: fixed and remotely verified for Android runtime `0.1.5`, pending
-  Flutter `0.1.5` pub.dev release
+- Status: fixed and remotely verified in Flutter `0.1.5` plus Android runtime
+  `0.1.5`
 - Found while validating: `D:\TestProject\flutter-samples\platform_design`
 - Bridge version: Flutter `0.1.4`, Android runtime `0.1.4`
 - Evidence:
@@ -44,8 +44,11 @@ workaround when one exists.
   After removing `mavenLocal()`, the app rebuilt against JitPack remote
   Android runtime `0.1.5`, installed, and reported bridge `0.1.5` with Flutter
   widget snapshot and operable node data.
-- Remaining work: publish Flutter `0.1.5` to pub.dev, then repeat the same
-  sample with pub.dev remote Flutter package and JitPack remote Android runtime.
+- Verification after pub.dev release: `platform_design` removed the local path
+  override and resolved `ai_app_bridge_flutter: ^0.1.5` from pub.dev. The APK
+  built, installed, and reported bridge `0.1.5`, Flutter app
+  `platform_design`, `operableCount=6`, first widget `MyAdaptingApp`, and
+  native child `FlutterView`.
 
 ## Flutter initialization before binding prevents snapshot delivery
 
@@ -62,7 +65,7 @@ workaround when one exists.
 
 ## Flutter package SDK constraint is narrower than the implementation requires
 
-- Status: fixed in source for `0.1.5`, pending pub.dev release
+- Status: fixed and published in Flutter `0.1.5`
 - Found while reviewing package metadata during Flutter sample validation
 - Bridge version: Flutter `0.1.4`
 - Evidence: `pubspec.yaml` required Dart `^3.9.2`, while the integration docs
