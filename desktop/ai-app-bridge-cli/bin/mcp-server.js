@@ -18,18 +18,19 @@ process.stdin.on('error', () => {});
 
 function drainMessages() {
   while (true) {
-    const headerEnd = buffer.indexOf('\r\n\r\n');
+    const delimiter = findHeaderDelimiter(buffer);
+    const headerEnd = delimiter.index;
     if (headerEnd < 0) {
       return;
     }
     const header = buffer.subarray(0, headerEnd).toString('utf8');
     const match = /^Content-Length:\s*(\d+)$/im.exec(header);
     if (!match) {
-      buffer = buffer.subarray(headerEnd + 4);
+      buffer = buffer.subarray(headerEnd + delimiter.length);
       continue;
     }
     const contentLength = Number(match[1]);
-    const messageStart = headerEnd + 4;
+    const messageStart = headerEnd + delimiter.length;
     const messageEnd = messageStart + contentLength;
     if (buffer.length < messageEnd) {
       return;
@@ -40,6 +41,18 @@ function drainMessages() {
       writeLog(`unhandled message error: ${error.stack || error}`);
     });
   }
+}
+
+function findHeaderDelimiter(source) {
+  const crlfIndex = source.indexOf('\r\n\r\n');
+  const lfIndex = source.indexOf('\n\n');
+  if (crlfIndex < 0) {
+    return { index: lfIndex, length: 2 };
+  }
+  if (lfIndex < 0 || crlfIndex < lfIndex) {
+    return { index: crlfIndex, length: 4 };
+  }
+  return { index: lfIndex, length: 2 };
 }
 
 async function handleMessage(body) {
@@ -64,7 +77,7 @@ async function handleMessage(body) {
         },
         serverInfo: {
           name: 'ai-app-bridge',
-          version: '0.1.5',
+          version: '0.1.6',
         },
       });
       return;
