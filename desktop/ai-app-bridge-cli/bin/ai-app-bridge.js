@@ -25,6 +25,7 @@ async function main() {
     adb: options.adb || defaults.adb,
     serial: options.serial || defaults.serial,
     port: Number(options.port || defaults.port),
+    explicitPort: options.port !== undefined,
     packageName: options.packageName || defaults.packageName,
     nativeActivity: options.nativeActivity || defaults.nativeActivity,
     flutterActivity: options.flutterActivity || defaults.flutterActivity,
@@ -46,8 +47,7 @@ async function main() {
 async function runCommand(command, options, ctx) {
   switch (command) {
     case 'forward':
-      await ensureForward(ctx);
-      return { ok: true, forward: `tcp:${ctx.port} -> device tcp:${ctx.port}` };
+      return ensureForward(ctx);
     case 'remove-forward':
       await adb(ctx, ['forward', '--remove', `tcp:${ctx.port}`]);
       return { ok: true, removed: `tcp:${ctx.port}` };
@@ -227,7 +227,25 @@ async function adbBinaryToFile(ctx, args, outFile) {
 }
 
 async function ensureForward(ctx) {
-  await adb(ctx, ['forward', `tcp:${ctx.port}`, `tcp:${ctx.port}`]);
+  const devicePort = await resolveDevicePort(ctx);
+  await adb(ctx, ['forward', `tcp:${ctx.port}`, `tcp:${devicePort}`]);
+  ctx.devicePort = devicePort;
+  return { ok: true, forward: `tcp:${ctx.port} -> device tcp:${devicePort}` };
+}
+
+async function resolveDevicePort(ctx) {
+  if (ctx.explicitPort) return ctx.port;
+  try {
+    const result = await adb(ctx, ['shell', 'run-as', ctx.packageName, 'cat', 'files/ai_app_bridge_port.json']);
+    const state = JSON.parse(result.stdout.trim());
+    const discoveredPort = Number(state.port);
+    if (state.ok === true && Number.isInteger(discoveredPort) && discoveredPort > 0) {
+      return discoveredPort;
+    }
+  } catch (_) {
+    // Fall back to the historical default port for older bridge versions.
+  }
+  return ctx.port;
 }
 
 async function bridgeGet(ctx, requestPath) {

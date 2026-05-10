@@ -59,7 +59,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.3")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.4")
 }
 ```
 
@@ -91,11 +91,11 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.3"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.4"
 }
 
 aiAppBridge {
-    okHttpCaptureEnabled = true
+    setOkHttpCaptureEnabled(true)
 }
 ```
 
@@ -109,7 +109,7 @@ dependencies:
     git:
       url: https://github.com/ldpGitHub/ai-app-bridge.git
       path: flutter/ai_app_bridge_flutter
-      ref: 0.1.3
+      ref: 0.1.4
 ```
 
 Initialize once:

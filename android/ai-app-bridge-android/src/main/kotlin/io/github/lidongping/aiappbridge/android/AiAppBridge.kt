@@ -29,6 +29,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.lang.ref.WeakReference
 import java.lang.reflect.Proxy
 import java.net.BindException
@@ -46,6 +47,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -59,7 +61,7 @@ object AiAppBridge {
     private const val maxEventEntries = 300
     private const val maxStateEntries = 200
     private const val maxCapturedBodyChars = 20_000
-    private const val bridgeVersion = "0.1.3"
+    private const val bridgeVersion = "0.1.4"
     private const val redactedValue = "[redacted]"
     private val sensitiveKeyPattern = Regex(
         "(?i)(authorization|cookie|token|accessToken|refreshToken|session|password|passwd|pwd|secret|mobile|phone|smsCode|verifyCode|verificationCode|captcha)",
@@ -807,28 +809,69 @@ object AiAppBridge {
         private val context: Context,
         private val port: Int,
     ) {
+        private val activePort = AtomicInteger(port)
         private val executor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "ai-app-bridge").apply { isDaemon = true }
         }
 
         fun start() {
             executor.execute {
-                try {
-                    ServerSocket().use { serverSocket ->
-                        serverSocket.reuseAddress = true
-                        serverSocket.bind(
-                            InetSocketAddress(InetAddress.getByName("127.0.0.1"), port),
-                        )
-                        Log.i(tag, "AI app bridge listening on 127.0.0.1:$port")
-                        while (!Thread.currentThread().isInterrupted) {
-                            handleClient(serverSocket.accept())
-                        }
+                writePortState(ok = false, port = port, error = "starting")
+                var lastError: Throwable? = null
+                for (candidatePort in port..(port + 50)) {
+                    try {
+                        serve(candidatePort)
+                        return@execute
+                    } catch (error: BindException) {
+                        lastError = error
+                        Log.w(tag, "AI app bridge port $candidatePort is already in use", error)
+                    } catch (error: SecurityException) {
+                        lastError = error
+                        Log.w(tag, "AI app bridge cannot open local socket; INTERNET permission is required", error)
+                        break
+                    } catch (error: Throwable) {
+                        lastError = error
+                        Log.w(tag, "AI app bridge stopped", error)
+                        break
                     }
-                } catch (error: BindException) {
-                    Log.w(tag, "AI app bridge port $port is already in use", error)
-                } catch (error: Throwable) {
-                    Log.w(tag, "AI app bridge stopped", error)
                 }
+                writePortState(
+                    ok = false,
+                    port = port,
+                    error = lastError?.javaClass?.simpleName ?: "no_available_port",
+                )
+            }
+        }
+
+        private fun serve(candidatePort: Int) {
+            ServerSocket().use { serverSocket ->
+                serverSocket.reuseAddress = true
+                serverSocket.bind(
+                    InetSocketAddress(InetAddress.getByName("127.0.0.1"), candidatePort),
+                )
+                activePort.set(candidatePort)
+                writePortState(ok = true, port = candidatePort, error = null)
+                Log.i(tag, "AI app bridge listening on 127.0.0.1:$candidatePort")
+                while (!Thread.currentThread().isInterrupted) {
+                    handleClient(serverSocket.accept())
+                }
+            }
+        }
+
+        private fun writePortState(ok: Boolean, port: Int, error: String?) {
+            try {
+                val payload = JSONObject()
+                    .put("ok", ok)
+                    .put("packageName", context.packageName)
+                    .put("port", port)
+                    .put("version", bridgeVersion)
+                    .put("updatedAtMs", System.currentTimeMillis())
+                if (!error.isNullOrBlank()) {
+                    payload.put("error", error)
+                }
+                File(context.filesDir, "ai_app_bridge_port.json").writeText(payload.toString())
+            } catch (error: Throwable) {
+                Log.w(tag, "AI app bridge failed to write port state", error)
             }
         }
 
@@ -970,7 +1013,7 @@ object AiAppBridge {
                         .put("version", bridgeVersion)
                         .put("transport", "http")
                         .put("host", "127.0.0.1")
-                        .put("port", port),
+                        .put("port", activePort.get()),
                 )
                 .put(
                     "app",
