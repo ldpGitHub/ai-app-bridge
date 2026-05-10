@@ -2,7 +2,7 @@
 
 [English](README.en.md)
 
-AI App Bridge 让 AI agent 可以直接接入正在运行的 Android / Flutter 应用。它提供原生 UI、WebView、View tree / Widget tree / DOM、网络请求和运行日志等运行时能力，让 AI 不只看截图，也能基于真实状态推进移动端开发。
+AI App Bridge 让 AI agent 可以直接接入正在运行的 Android / Flutter 应用。它提供操作原生 UI / H5、获取WebView、View tree / Widget tree / DOM、网络请求和运行日志等运行时能力，让 AI 不只看截图，也能基于真实状态自主迭代开发移动端。
 
 它的核心目标是让 AI agent 按“观察 -> 操作 -> 读取结果 -> 验证 -> 继续迭代”的方式自主推进，而不是在缺少运行证据时猜测。
 
@@ -15,6 +15,7 @@ AI App Bridge is a mobile runtime bridge for autonomous AI agents. It lets agent
 - 当前页面处在什么状态？
 - 原生 View、WebView DOM、Flutter Widget 的真实结构是什么？
 - 哪些元素可以点击、输入或滚动？WebView 中能执行哪些脚本？
+- 如何精准的操作UI和输入？
 - 执行动作后产生了哪些网络请求、日志、状态变化和事件？
 - 修改代码或触发操作后，应用是否真的进入了预期状态？
 
