@@ -123,7 +123,7 @@ import 'package:flutter/widgets.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  AiAppBridge.instance.initialize(appName: 'sample_app');
+  AiAppBridge.instance.initialize(appName: 'your_app_name');
   runApp(const MyApp());
 }
 ```
