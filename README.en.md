@@ -2,10 +2,10 @@
 
 English | [中文](README.md)
 
-**From “AI writes code” to “AI delivers verified changes.”**
+## From “AI writes code” to “AI delivers verified changes”
 
-Before: AI writes the code, then you still have to run the app, tap through flows, copy logs, inspect network traffic, and decide whether it worked.  
-Now: AI can build and install the app, operate real flows, read real UI state, inspect network and logs, and verify the result itself.
+> **Before:** AI writes the code, then you still have to run the app, tap through flows, copy logs, inspect network traffic, and decide whether it worked.  
+> **Now:** AI can build and install the app, operate real flows, read real UI state, inspect network and logs, and verify the result itself.
 
 AI App Bridge gives autonomous AI agents a runtime interface to running Android and Flutter apps. Agents can inspect the current screen, operate native UI and WebViews, read View tree / Widget tree / DOM data, collect network requests and logs, verify outcomes, and keep iterating from real evidence.
 
