@@ -64,7 +64,7 @@ async function handleMessage(body) {
         },
         serverInfo: {
           name: 'ai-app-bridge',
-          version: '0.1.4',
+          version: '0.1.5',
         },
       });
       return;

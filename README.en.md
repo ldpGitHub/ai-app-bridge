@@ -133,9 +133,7 @@ AiAppBridge.instance.registerH5Adapter(
 ## Desktop CLI / MCP
 
 ```bash
-git clone https://github.com/ldpGitHub/ai-app-bridge.git
-cd ai-app-bridge/desktop/ai-app-bridge-cli
-npm install -g .
+npm install -g @lidongping/ai-app-bridge
 
 ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
 ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
