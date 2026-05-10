@@ -6,7 +6,7 @@ workaround when one exists.
 
 ## Android runtime 0.1.4 cannot be consumed by minSdk 21 apps
 
-- Status: fixed and locally verified for `0.1.5`, pending remote JitPack release
+- Status: fixed and remotely verified for `0.1.5`
 - Found while validating: `D:\TestProject\android-architecture-samples`
 - Bridge version: `0.1.4`
 - Evidence:
@@ -17,16 +17,15 @@ workaround when one exists.
   released `0.1.4` runtime dependency.
 - Fix: lowered Android runtime SDK and Flutter wrapper Android `minSdk` from 23
   to 21.
-- Verification: published the fixed Android artifacts to Maven Local as
-  `0.1.5`, then rebuilt and installed `android-architecture-samples`;
-  `/v1/status` reported bridge `0.1.5`, and `/v1/view/tree` worked.
-- Remaining work: publish a new tag so JitPack consumers can fetch the fixed
-  artifact remotely.
+- Verification: rebuilt and installed `android-architecture-samples` first with
+  Maven Local `0.1.5`, then again after removing `mavenLocal()` and forcing
+  JitPack remote `0.1.5`; `/v1/status` reported bridge `0.1.5`, and
+  `/v1/view/tree` worked.
 
 ## Flutter pub package 0.1.4 still requires a manual Android runtime dependency
 
-- Status: fixed and locally verified for `0.1.5`, pending pub.dev release and
-  remote JitPack release
+- Status: fixed and remotely verified for Android runtime `0.1.5`, pending
+  Flutter `0.1.5` pub.dev release
 - Found while validating: `D:\TestProject\flutter-samples\platform_design`
 - Bridge version: Flutter `0.1.4`, Android runtime `0.1.4`
 - Evidence:
@@ -41,11 +40,12 @@ workaround when one exists.
   the debug runtime class.
 - Verification: `platform_design` removed the host Android app's manual runtime
   dependency and used the local Flutter plugin `0.1.5`; debug runtime classpath
-  included `ai-app-bridge-android:0.1.5`, release runtime classpath did not,
-  and the installed app reported bridge `0.1.5` with Flutter widget snapshot
-  and operable node data.
-- Remaining work: publish Android `0.1.5` to JitPack and Flutter `0.1.5` to
-  pub.dev, then repeat the same sample using remote dependencies only.
+  included `ai-app-bridge-android:0.1.5`, release runtime classpath did not.
+  After removing `mavenLocal()`, the app rebuilt against JitPack remote
+  Android runtime `0.1.5`, installed, and reported bridge `0.1.5` with Flutter
+  widget snapshot and operable node data.
+- Remaining work: publish Flutter `0.1.5` to pub.dev, then repeat the same
+  sample with pub.dev remote Flutter package and JitPack remote Android runtime.
 
 ## Flutter initialization before binding prevents snapshot delivery
 

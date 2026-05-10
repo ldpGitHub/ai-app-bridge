@@ -39,6 +39,15 @@
     `ai-app-bridge-android:0.1.5`, release runtime classpath did not include
     it, the APK installed, `/v1/status` reported bridge `0.1.5`, and Flutter
     widget/operable data was present.
+- `0.1.5` remote dependency verification completed after pushing tag `0.1.5`:
+  - JitPack returned HTTP 200 for both `ai-app-bridge-android` and
+    `ai-app-bridge-gradle-plugin` POMs.
+  - `android-architecture-samples` removed `mavenLocal()`, rebuilt with
+    `--refresh-dependencies`, installed, and reported bridge `0.1.5` through
+    `/v1/status`; `/v1/view/tree` returned the Compose root.
+  - `platform_design` removed `mavenLocal()`, rebuilt using the local Flutter
+    plugin plus remote JitPack Android runtime, installed, and reported bridge
+    `0.1.5` with Flutter widget/operable data.
 - Observed runtime ports during validation were `18081`, `18082`, and `18083`;
   desktop tools must keep reading the per-app port file and must not assume
   `18080`.
