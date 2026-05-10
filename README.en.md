@@ -143,11 +143,16 @@ npm install -g .
 
 ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
 ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
-ai-app-bridge smoke --package-name io.github.lidongping.aiappbridge.sample
 ai-app-bridge-mcp
 ```
 
 Use `--serial <deviceId>` when more than one Android device is connected.
+
+`smoke` is the full self-test command for this repository's sample app. After installing `examples/android-native-sample`, run:
+
+```bash
+ai-app-bridge smoke --package-name io.github.lidongping.aiappbridge.sample
+```
 
 ## Debug Builds Only
 
