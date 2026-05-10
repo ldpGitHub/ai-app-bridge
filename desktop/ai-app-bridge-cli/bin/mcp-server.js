@@ -77,7 +77,7 @@ async function handleMessage(body) {
         },
         serverInfo: {
           name: 'ai-app-bridge',
-          version: '0.1.6',
+          version: '0.1.7',
         },
       });
       return;
@@ -104,7 +104,7 @@ async function handleMessage(body) {
 
 function toolDefinitions() {
   return [
-    bridgeTool('status', 'Read bridge status, app info, capture counts, and latest Flutter snapshot.'),
+    bridgeTool('status', 'Read bridge status, app info, capture counts, and latest Flutter snapshot. If default port 18080 times out, agents should retry with the target Android packageName so the CLI can discover the app bridge port.'),
     bridgeTool('tree', 'Read the Android View tree from the in-app bridge.'),
     bridgeTool('flutter_tree', 'Read the latest Flutter widget/layout snapshot.'),
     bridgeTool('h5_dom', 'Read native Android WebView DOM from the current Activity.'),
@@ -236,8 +236,8 @@ function baseSchema(extraProperties = {}, extraRequired = []) {
     properties: {
       serial: { type: 'string', description: 'ADB serial. Optional when one device is connected.' },
       adb: { type: 'string', description: 'ADB executable path or command.' },
-      port: { type: 'number', description: 'Bridge port. Defaults to 18080.' },
-      packageName: { type: 'string', description: 'Android package name. Defaults to io.github.lidongping.aiappbridge.sample.' },
+      port: { type: 'number', description: 'Raw bridge port override. Defaults to 18080; agents should prefer packageName when targeting a known app.' },
+      packageName: { type: 'string', description: 'Target Android package name. Use this when default 18080 is unreachable or multiple bridge-enabled apps are installed; the CLI discovers the app bridge port from package-private state.' },
       initialRoute: { type: 'string', description: 'Flutter initial route for launch_flutter.' },
       outFile: { type: 'string', description: 'Screenshot output path for screenshot.' },
       sinceId: { type: 'number', description: 'Capture query lower bound by record id.' },
@@ -381,10 +381,22 @@ function runProcess(cliArgs) {
         stdout.trim(),
         stderr.trim() ? `stderr:\n${stderr.trim()}` : '',
         code === 0 ? '' : `exitCode: ${code}`,
+        retryWithPackageNameHint(cliArgs, stdout, stderr, code),
       ].filter(Boolean).join('\n\n');
       resolve(toolText(text || 'ok', code !== 0));
     });
   });
+}
+
+function retryWithPackageNameHint(cliArgs, stdout, stderr, code) {
+  if (code === 0 || cliArgs.includes('--package-name') || cliArgs.includes('--port')) {
+    return '';
+  }
+  const output = `${stdout}\n${stderr}`;
+  if (!/HTTP timeout: http:\/\/127\.0\.0\.1:18080\//.test(output)) {
+    return '';
+  }
+  return 'agentHint: Default bridge port 18080 accepted the connection but did not answer. If you know the target app, retry this tool with packageName so the CLI can discover that app bridge port.';
 }
 
 function toolText(text, isError = false) {
