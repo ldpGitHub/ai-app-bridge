@@ -5,11 +5,16 @@ const test = require('node:test');
 
 const {
   buildBridgeFailureResult,
+  defaultInstallerButtonTexts,
   findTappableNodeByText,
   helpText,
+  installerButtonTextsForSurface,
+  isLikelyInstallerSurface,
   normalizeBridgeError,
+  parseKeyboardState,
   parseComponentFromWindowLine,
   parseForegroundWindow,
+  shouldDismissKeyboardForPoint,
 } = require('../bin/ai-app-bridge.js');
 
 const cliPath = path.join(__dirname, '..', 'bin', 'ai-app-bridge.js');
@@ -137,4 +142,65 @@ test('tap-text candidate selection reports offscreen-only bridge match', () => {
   const match = findTappableNodeByText(tree, 'Hidden Action');
   assert.equal(match.node, null);
   assert.equal(match.rejected.reason, 'center_outside_viewport');
+});
+
+test('parses visible Android keyboard state from dumpsys input_method markers', () => {
+  const visible = parseKeyboardState('mInputShown=true\nmImeWindowVis=0x1');
+  assert.equal(visible.ok, true);
+  assert.equal(visible.visible, true);
+  assert.deepEqual(visible.markers, ['mInputShown=true', 'mImeWindowVis']);
+
+  const hidden = parseKeyboardState('mInputShown=false\nmImeWindowVis=0x0');
+  assert.equal(hidden.visible, false);
+
+  const staleInputView = parseKeyboardState('mImeWindowVis=0\nmInputShown=false\nmWindowVisible=false\nmIsInputViewShown=true');
+  assert.equal(staleInputView.visible, false);
+  assert.ok(staleInputView.hiddenMarkers.includes('mWindowVisible=false'));
+});
+
+test('keyboard guard only dismisses for lower-screen targets while IME is visible', () => {
+  const viewport = { left: 0, top: 0, right: 1080, bottom: 2400 };
+  assert.equal(shouldDismissKeyboardForPoint({
+    point: { x: 540, y: 1800 },
+    viewport,
+    keyboardVisible: true,
+  }).dismiss, true);
+  assert.equal(shouldDismissKeyboardForPoint({
+    point: { x: 540, y: 500 },
+    viewport,
+    keyboardVisible: true,
+  }).dismiss, false);
+  assert.equal(shouldDismissKeyboardForPoint({
+    point: { x: 540, y: 1800 },
+    viewport,
+    keyboardVisible: false,
+  }).dismiss, false);
+});
+
+test('installer assistant recognises ROM installer surfaces and safe positive labels', () => {
+  assert.equal(isLikelyInstallerSurface(
+    { packageName: 'com.oplus.appdetail' },
+    '<node text="检测结果：涉及敏感权限" package="com.oplus.appdetail" />',
+  ), true);
+  assert.equal(isLikelyInstallerSurface(
+    { packageName: 'com.example.app' },
+    '<node text="安装" package="com.example.app" />',
+  ), false);
+  assert.equal(isLikelyInstallerSurface(
+    { packageName: 'com.heytap.market' },
+    '<node text="打开" resource-id="com.heytap.market:id/bt_notification_snack_bar" package="com.heytap.market" />',
+  ), false);
+  assert.equal(isLikelyInstallerSurface(
+    {
+      packageName: 'com.oplus.appdetail',
+      activity: 'com.oplus.appdetail.model.finish.InstallFinishActivity',
+    },
+    '<node text="安装" resource-id="com.oplus.appdetail:id/btn_install" package="com.oplus.appdetail" />',
+  ), true);
+  assert.ok(defaultInstallerButtonTexts().includes('继续安装'));
+  assert.ok(defaultInstallerButtonTexts().includes('安装'));
+  assert.equal(defaultInstallerButtonTexts().includes('打开'), false);
+  assert.equal(defaultInstallerButtonTexts().includes('Open'), false);
+  assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('安装'), false);
+  assert.equal(installerButtonTextsForSurface({ finish: false, market: true }).includes('Install'), false);
 });

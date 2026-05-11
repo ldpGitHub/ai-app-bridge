@@ -29,15 +29,12 @@ object AiAppOkHttpAutoCapture {
                 arrayOf(interceptorClass),
                 OkHttpInterceptorInvocationHandler(),
             )
-            val addInterceptor = builderClass.methods.firstOrNull { method ->
-                method.name == "addInterceptor" &&
-                    method.parameterTypes.size == 1 &&
-                    method.parameterTypes[0].name == "okhttp3.Interceptor"
-            }
-            if (addInterceptor != null) {
-                addInterceptor.invoke(builder, interceptor)
-                installedBuilders[builder] = true
-            }
+            // Do not enumerate all public Builder methods here. OkHttp 4.x exposes
+            // java.time.Duration overloads; resolving those on older Android
+            // devices can throw NoClassDefFoundError before we get to addInterceptor.
+            val addInterceptor = builderClass.getDeclaredMethod("addInterceptor", interceptorClass)
+            addInterceptor.invoke(builder, interceptor)
+            installedBuilders[builder] = true
             builder
         } catch (error: Throwable) {
             AiAppBridge.recordLog(

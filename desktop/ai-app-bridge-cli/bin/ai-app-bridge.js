@@ -26,6 +26,9 @@ Commands:
   tap-text               Tap a visible node by exact text or content description.
   wait-text              Wait until text appears in bridge or UIAutomator output.
   input-text             Type text through ADB input.
+  keyboard-state         Read Android soft keyboard visibility from dumpsys.
+  hide-keyboard          Hide the Android soft keyboard when it is visible.
+  install-apk            Install an APK and assist device-side installer screens.
   smoke                  Run the native sample smoke test.
   help                   Show this help.
 
@@ -36,7 +39,12 @@ Options:
   --adb <path>           ADB executable path.
   --adb-timeout-ms <ms>  Timeout for ADB subprocesses.
   --out-file <path>      Screenshot output path.
+  --apk-path <path>      APK path used by install-apk.
   --target-text <text>   Text used by tap-text or wait-text.
+  --hide-keyboard        Hide the soft keyboard after input-text.
+  --allow-downgrade      Pass -d to adb install.
+  --install-timeout-ms <ms>  Timeout for the adb install subprocess.
+  --installer-timeout-ms <ms>  Timeout for installer UI confirmation handling.
   --help                 Show this help without touching ADB or the device.`;
 
 if (require.main === module) {
@@ -148,11 +156,17 @@ async function runCommand(command, options, ctx) {
     case 'tap':
       return tap(ctx, requiredNumber(options.tapX, 'tapX'), requiredNumber(options.tapY, 'tapY'));
     case 'tap-text':
-      return tapText(ctx, requiredString(options.targetText, 'targetText'));
+      return tapText(ctx, requiredString(options.targetText, 'targetText'), options);
     case 'wait-text':
       return waitText(ctx, requiredString(options.targetText, 'targetText'), Number(options.timeoutSec || 10));
     case 'input-text':
-      return inputText(ctx, requiredString(options.text, 'text'));
+      return inputText(ctx, requiredString(options.text, 'text'), options);
+    case 'keyboard-state':
+      return keyboardState(ctx);
+    case 'hide-keyboard':
+      return hideKeyboard(ctx, options);
+    case 'install-apk':
+      return installApk(ctx, options);
     case 'swipe':
       return swipe(
         ctx,
@@ -215,9 +229,7 @@ function parseArgs(argv) {
 }
 
 async function adb(ctx, args, { binary = false } = {}) {
-  const allArgs = [];
-  if (ctx.serial) allArgs.push('-s', ctx.serial);
-  allArgs.push(...args);
+  const allArgs = adbArgs(ctx, args);
   return new Promise((resolve, reject) => {
     execFile(ctx.adb, allArgs, {
       encoding: binary ? 'buffer' : 'utf8',
@@ -239,9 +251,7 @@ async function adb(ctx, args, { binary = false } = {}) {
 }
 
 async function adbBinaryToFile(ctx, args, outFile) {
-  const allArgs = [];
-  if (ctx.serial) allArgs.push('-s', ctx.serial);
-  allArgs.push(...args);
+  const allArgs = adbArgs(ctx, args);
   await fs.promises.mkdir(path.dirname(path.resolve(outFile)), { recursive: true });
   return new Promise((resolve, reject) => {
     const child = spawn(ctx.adb, allArgs, { windowsHide: true });
@@ -266,6 +276,334 @@ async function adbBinaryToFile(ctx, args, outFile) {
       });
     });
   });
+}
+
+function adbArgs(ctx, args) {
+  const allArgs = [];
+  if (ctx.serial) allArgs.push('-s', ctx.serial);
+  allArgs.push(...args);
+  return allArgs;
+}
+
+async function installApk(ctx, options) {
+  const apkPath = path.resolve(requiredString(options.apkPath || options.apk, 'apkPath'));
+  if (!fs.existsSync(apkPath)) {
+    throw new Error(`apkPath does not exist: ${apkPath}`);
+  }
+
+  const packageBefore = await safePackageInstallState(ctx);
+  const installMode = packageBefore.known
+    ? (packageBefore.installed ? 'reinstall' : 'new_install')
+    : 'unknown_without_package_name';
+  const installArgs = ['install'];
+  if (!booleanOption(options.streaming)) {
+    installArgs.push('--no-streaming');
+  }
+  installArgs.push('-r');
+  if (booleanOption(options.allowDowngrade)) {
+    installArgs.push('-d');
+  }
+  installArgs.push(apkPath);
+
+  const installTimeoutMs = Number(options.installTimeoutMs || 180000);
+  const installerTimeoutMs = Number(options.installerTimeoutMs || 90000);
+  const intervalMs = Number(options.intervalMs || 700);
+  const child = spawn(ctx.adb, adbArgs(ctx, installArgs), { windowsHide: true });
+  let stdout = '';
+  let stderr = '';
+  let processDone = false;
+  let processResult = null;
+
+  const processPromise = new Promise((resolve) => {
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      processDone = true;
+      processResult = { code: null, error: firstErrorLine(error) };
+      resolve(processResult);
+    });
+    child.on('close', (code, signal) => {
+      processDone = true;
+      processResult = { code, signal, error: null };
+      resolve(processResult);
+    });
+  });
+
+  const installerActions = [];
+  const installDeadline = Date.now() + installTimeoutMs;
+  while (!processDone && Date.now() < installDeadline) {
+    const action = await installerAssistOnce(ctx, { phase: 'install-pending' });
+    if (action.action === 'tap') {
+      installerActions.push(action);
+    }
+    await sleep(intervalMs);
+  }
+
+  let timedOut = false;
+  if (!processDone) {
+    timedOut = true;
+    child.kill();
+  }
+
+  processResult = processResult || (await processPromise);
+  const postInstallActions = await assistInstallerScreens(ctx, {
+    phase: 'post-install',
+    timeoutMs: installerTimeoutMs,
+    intervalMs,
+  });
+  const packageAfter = await safePackageInstallState(ctx);
+  const output = `${stdout}\n${stderr}`.trim();
+  const adbSuccess = processResult.code === 0 && /Success/i.test(output);
+  const packageVerified = !packageAfter.known || packageAfter.installed;
+
+  return {
+    ok: !timedOut && adbSuccess && packageVerified,
+    action: 'install-apk',
+    transport: 'adb',
+    apkPath,
+    packageName: ctx.explicitPackageName ? ctx.packageName : null,
+    installMode,
+    installedBefore: packageBefore,
+    installedAfter: packageAfter,
+    process: {
+      ...processResult,
+      timedOut,
+      stdout: stdout.trim(),
+      stderr: stderr.trim(),
+    },
+    installerActions,
+    postInstallActions,
+    error: timedOut ? 'install_timeout' : (adbSuccess ? null : 'adb_install_failed'),
+  };
+}
+
+async function safePackageInstallState(ctx) {
+  if (!ctx.explicitPackageName) {
+    return { known: false, reason: 'package_name_not_provided' };
+  }
+  try {
+    const result = await adb(ctx, ['shell', 'pm', 'path', ctx.packageName]);
+    const paths = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    return {
+      known: true,
+      installed: paths.some((line) => line.startsWith('package:')),
+      paths,
+    };
+  } catch (error) {
+    return {
+      known: true,
+      installed: false,
+      error: firstErrorLine(error),
+    };
+  }
+}
+
+async function assistInstallerScreens(ctx, options) {
+  const timeoutMs = Number(options.timeoutMs || 90000);
+  const intervalMs = Number(options.intervalMs || 700);
+  const deadline = Date.now() + timeoutMs;
+  const actions = [];
+  let quietPolls = 0;
+  while (Date.now() < deadline) {
+    const action = await installerAssistOnce(ctx, { phase: options.phase || 'installer' });
+    if (action.action === 'tap') {
+      actions.push(action);
+      quietPolls = 0;
+      await sleep(intervalMs);
+      continue;
+    }
+    if (action.reason === 'not_installer_surface') {
+      quietPolls += 1;
+      if (quietPolls >= 2) break;
+    }
+    await sleep(intervalMs);
+  }
+  return actions;
+}
+
+async function installerAssistOnce(ctx, options = {}) {
+  let foreground;
+  let xml;
+  try {
+    foreground = await foregroundWindow(ctx);
+    xml = await uiaTree(ctx);
+  } catch (error) {
+    return {
+      ok: false,
+      action: 'none',
+      phase: options.phase || 'installer',
+      reason: 'probe_failed',
+      message: firstErrorLine(error),
+    };
+  }
+
+  const surface = classifyInstallerSurface(foreground, xml);
+  if (!surface.installer) {
+    return {
+      ok: true,
+      action: 'none',
+      phase: options.phase || 'installer',
+      reason: 'not_installer_surface',
+      foreground,
+      surface,
+    };
+  }
+
+  if (ctx.explicitPackageName) {
+    const packageState = await safePackageInstallState(ctx);
+    if (packageState.installed) {
+      return {
+        ok: true,
+        action: 'none',
+        phase: options.phase || 'installer',
+        reason: 'target_package_already_installed',
+        foreground,
+        surface,
+        packageState,
+      };
+    }
+  }
+
+  if (surface.finish) {
+    return {
+      ok: true,
+      action: 'none',
+      phase: options.phase || 'installer',
+      reason: 'installer_finish_surface_no_action',
+      foreground,
+      surface,
+    };
+  }
+
+  const node = findUiaNodeByAny(xml, {
+    texts: installerButtonTextsForSurface(surface),
+    exact: true,
+    requireClickable: true,
+  });
+  if (!node) {
+    return {
+      ok: false,
+      action: 'none',
+      phase: options.phase || 'installer',
+      reason: 'installer_button_not_found',
+      foreground,
+      surface,
+    };
+  }
+
+  const x = Math.round((node.left + node.right) / 2);
+  const y = Math.round((node.top + node.bottom) / 2);
+  await tap(ctx, x, y);
+  return {
+    ok: true,
+    action: 'tap',
+    phase: options.phase || 'installer',
+    source: 'uiautomator',
+    x,
+    y,
+    foreground,
+    surface,
+    matched: node.matched,
+  };
+}
+
+function isLikelyInstallerSurface(foreground, xml) {
+  return classifyInstallerSurface(foreground, xml).installer;
+}
+
+function classifyInstallerSurface(foreground, xml) {
+  const text = String(xml || '');
+  const foregroundPackage = String(foreground?.packageName || '');
+  const foregroundActivity = String(foreground?.activity || '');
+  const marketPackages = [
+    'com.heytap.market',
+    'com.oppo.market',
+    'com.android.vending',
+  ];
+  const knownInstallerPackages = [
+    'com.android.packageinstaller',
+    'com.google.android.packageinstaller',
+    'com.miui.packageinstaller',
+    'com.samsung.android.packageinstaller',
+    'com.oplus.appdetail',
+    'com.coloros.securitypermission',
+    'packageinstaller',
+  ];
+  const hasInstallerPackage = knownInstallerPackages.some((value) => {
+    return foregroundPackage.includes(value) || text.includes(`package="${value}`);
+  });
+  const hasMarketPackage = marketPackages.some((value) => foregroundPackage.includes(value) || text.includes(`package="${value}`));
+  const finish = /finish/i.test(foregroundActivity) ||
+    text.includes('安装完成') ||
+    text.includes('已安装') ||
+    text.includes('Install complete') ||
+    text.includes('App installed');
+  if (hasInstallerPackage) {
+    return {
+      installer: true,
+      finish,
+      market: false,
+      source: 'installer_package',
+      foregroundPackage,
+      foregroundActivity,
+    };
+  }
+  if (hasMarketPackage) {
+    return {
+      installer: false,
+      finish: false,
+      market: true,
+      source: 'market_package',
+      foregroundPackage,
+      foregroundActivity,
+    };
+  }
+  const hasRiskKeyword = [
+    '检测结果',
+    '未知来源',
+    '未知应用',
+    '敏感权限',
+    '安全扫描',
+    'Install unknown apps',
+    'Package installer',
+  ].some((value) => text.includes(value));
+  return {
+    installer: hasRiskKeyword,
+    finish,
+    market: false,
+    source: hasRiskKeyword ? 'risk_keyword' : 'not_installer',
+    foregroundPackage,
+    foregroundActivity,
+  };
+}
+
+function installerButtonTextsForSurface(surface) {
+  const base = [
+    '继续安装',
+    '仍然安装',
+    '允许',
+    '确定',
+    '继续',
+    '下一步',
+    'Continue install',
+    'Install anyway',
+    'Allow',
+    'OK',
+    'Continue',
+    'Next',
+  ];
+  if (!surface?.finish && !surface?.market) {
+    base.push('安装', 'Install');
+  }
+  return base;
+}
+
+function defaultInstallerButtonTexts() {
+  return installerButtonTextsForSurface({ finish: false, market: false });
 }
 
 async function ensureForward(ctx) {
@@ -596,13 +934,36 @@ async function tap(ctx, x, y) {
   return { ok: true, transport: 'adb', x, y };
 }
 
-async function tapText(ctx, targetText) {
+async function tapText(ctx, targetText, options = {}) {
   const tree = await bridgeGet(ctx, '/v1/view/tree');
   const bridgeMatch = findTappableNodeByText(tree, targetText);
   const node = bridgeMatch.node;
   if (node?.bounds) {
-    const x = Math.round((node.bounds.left + node.bounds.right) / 2);
-    const y = Math.round((node.bounds.top + node.bounds.bottom) / 2);
+    let x = Math.round((node.bounds.left + node.bounds.right) / 2);
+    let y = Math.round((node.bounds.top + node.bounds.bottom) / 2);
+    let keyboard = null;
+    if (!booleanOption(options.noAutoHideKeyboard)) {
+      keyboard = await maybeHideKeyboardForPoint(ctx, { x, y }, bridgeMatch.viewport);
+      if (keyboard.decision?.dismiss && !keyboard.dismissed) {
+        return {
+          ok: false,
+          error: 'keyboard_obscures_target',
+          targetText,
+          source: 'bridge-tree',
+          windowType: bridgeMatch.windowType,
+          x,
+          y,
+          keyboard,
+        };
+      }
+      if (keyboard.dismissed) {
+        const refreshedMatch = findTappableNodeByText(await bridgeGet(ctx, '/v1/view/tree'), targetText);
+        if (refreshedMatch.node?.bounds) {
+          x = Math.round((refreshedMatch.node.bounds.left + refreshedMatch.node.bounds.right) / 2);
+          y = Math.round((refreshedMatch.node.bounds.top + refreshedMatch.node.bounds.bottom) / 2);
+        }
+      }
+    }
     await tap(ctx, x, y);
     return {
       ok: true,
@@ -612,6 +973,7 @@ async function tapText(ctx, targetText) {
       windowType: bridgeMatch.windowType,
       x,
       y,
+      keyboard,
     };
   }
 
@@ -1356,9 +1718,142 @@ async function textPresent(ctx, targetText) {
   return false;
 }
 
-async function inputText(ctx, text) {
+async function keyboardState(ctx) {
+  try {
+    const result = await adb(ctx, ['shell', 'dumpsys', 'input_method']);
+    return parseKeyboardState(result.stdout);
+  } catch (error) {
+    return {
+      ok: false,
+      error: 'keyboard_state_probe_failed',
+      message: firstErrorLine(error),
+    };
+  }
+}
+
+function parseKeyboardState(raw) {
+  const text = String(raw || '');
+  const inputShown = text.includes('mInputShown=true') || text.includes('inputShown=true');
+  const windowVisible = text.includes('mWindowVisible=true');
+  const inputViewShown = text.includes('mIsInputViewShown=true') || text.includes('mInputViewStarted=true');
+  const imeWindowVisible = /\bmImeWindowVis=0x[13]\b/i.test(text) || /\bmImeWindowVisibility=0x[13]\b/i.test(text);
+  const markers = [];
+  if (inputShown) markers.push('mInputShown=true');
+  if (windowVisible) markers.push('mWindowVisible=true');
+  if (inputViewShown) markers.push('mIsInputViewShown=true');
+  if (imeWindowVisible) markers.push('mImeWindowVis');
+  const hiddenMarkers = [
+    'mInputShown=false',
+    'mWindowVisible=false',
+    'mImeWindowVis=0',
+  ].filter((marker) => text.includes(marker));
+  return {
+    ok: true,
+    source: 'dumpsys input_method',
+    visible: inputShown || imeWindowVisible || (windowVisible && inputViewShown),
+    markers,
+    hiddenMarkers,
+  };
+}
+
+async function hideKeyboard(ctx, options = {}) {
+  const before = await keyboardState(ctx);
+  const force = booleanOption(options.force);
+  if (!force && before.ok && !before.visible) {
+    return {
+      ok: true,
+      action: 'hide-keyboard',
+      dismissed: false,
+      reason: 'keyboard_not_visible',
+      before,
+      after: before,
+      attempts: [],
+    };
+  }
+
+  const attempts = [];
+  for (const keyCode of [111, 4]) {
+    await keyevent(ctx, keyCode);
+    await sleep(Number(options.intervalMs || 500));
+    const after = await keyboardState(ctx);
+    attempts.push({ keyCode, visible: after.visible, ok: after.ok });
+    if (after.ok && !after.visible) {
+      return {
+        ok: true,
+        action: 'hide-keyboard',
+        dismissed: true,
+        before,
+        after,
+        attempts,
+      };
+    }
+  }
+
+  const after = await keyboardState(ctx);
+  return {
+    ok: false,
+    action: 'hide-keyboard',
+    error: 'keyboard_still_visible',
+    dismissed: false,
+    before,
+    after,
+    attempts,
+  };
+}
+
+async function maybeHideKeyboardForPoint(ctx, point, viewport) {
+  const state = await keyboardState(ctx);
+  const decision = shouldDismissKeyboardForPoint({ point, viewport, keyboardVisible: state.visible });
+  if (!decision.dismiss) {
+    return {
+      dismissed: false,
+      state,
+      decision,
+    };
+  }
+  const hide = await hideKeyboard(ctx, { reason: decision.reason });
+  return {
+    dismissed: hide.dismissed,
+    state,
+    decision,
+    hide,
+  };
+}
+
+function shouldDismissKeyboardForPoint({ point, viewport, keyboardVisible }) {
+  if (!keyboardVisible) {
+    return { dismiss: false, reason: 'keyboard_not_visible' };
+  }
+  if (!point || !viewport) {
+    return { dismiss: false, reason: 'missing_geometry' };
+  }
+  const top = Number(viewport.top || 0);
+  const bottom = Number(viewport.bottom);
+  if (!Number.isFinite(bottom) || bottom <= top) {
+    return { dismiss: false, reason: 'invalid_viewport' };
+  }
+  const threshold = top + (bottom - top) * 0.58;
+  if (Number(point.y) >= threshold) {
+    return {
+      dismiss: true,
+      reason: 'target_may_be_obscured_by_keyboard',
+      threshold,
+    };
+  }
+  return {
+    dismiss: false,
+    reason: 'target_above_keyboard_risk_area',
+    threshold,
+  };
+}
+
+async function inputText(ctx, text, options = {}) {
   await adb(ctx, ['shell', 'input', 'text', text.replace(/ /g, '%s')]);
-  return { ok: true, transport: 'adb', text };
+  const result = { ok: true, transport: 'adb', text };
+  if (booleanOption(options.hideKeyboard)) {
+    result.keyboard = await hideKeyboard(ctx, options);
+  }
+  return result;
 }
 
 async function swipe(ctx, startX, startY, endX, endY, durationMs) {
@@ -1852,12 +2347,17 @@ function requiredNumber(value, name) {
 
 module.exports = {
   buildBridgeFailureResult,
+  defaultInstallerButtonTexts,
   findTappableNodeByText,
   firstErrorLine,
   helpText,
+  installerButtonTextsForSurface,
+  isLikelyInstallerSurface,
   nodeTapState,
   normalizeBridgeError,
+  parseKeyboardState,
   parseComponentFromWindowLine,
   parseForegroundWindow,
+  shouldDismissKeyboardForPoint,
 };
 

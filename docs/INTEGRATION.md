@@ -20,7 +20,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.6")
 }
 ```
 
@@ -58,7 +58,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.5"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.6"
 }
 
 aiAppBridge {
@@ -74,7 +74,7 @@ If the Android project does not already include JitPack, add `https://jitpack.io
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.5
+  ai_app_bridge_flutter: ^0.1.6
 ```
 
 Initialize once:

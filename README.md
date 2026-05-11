@@ -67,7 +67,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.6")
 }
 ```
 
@@ -99,7 +99,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.5"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.6"
 }
 
 aiAppBridge {
@@ -115,7 +115,7 @@ Flutter 项目只需要添加 pub 包。插件的 Android debug variant 会自�
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.5
+  ai_app_bridge_flutter: ^0.1.6
 ```
 
 初始化一次：

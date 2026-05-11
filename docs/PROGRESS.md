@@ -2,6 +2,31 @@
 
 ## 2026-05-11
 
+- Release-candidate validation for Android `0.1.6` and desktop CLI `0.1.11`
+  completed on OPPO device `FYZLAU49X8OVQGJ7`:
+  - Desktop CLI `npm run check`, `npm pack --dry-run`, and zero-side-effect
+    `--help` passed.
+  - Android runtime and Gradle plugin build passed with
+    `:ai-app-bridge-android:build :ai-app-bridge-gradle-plugin:build`.
+  - `install-apk` proved both `installMode=new_install` and
+    `installMode=reinstall`; the OPPO installer flow required tapping
+    `继续安装`, and the fixed helper stopped before app-market / installer
+    finish recommendation surfaces.
+  - A mistaken app-market install of `com.phoenix.read` was identified,
+    uninstalled, and covered by the new market-surface guard.
+  - Keyboard validation proved `keyboard-state` reports true when the IME is
+    visible, `input-text --hide-keyboard` dismisses it, and stale
+    `mIsInputViewShown=true` is not treated as visible when
+    `mInputShown=false`, `mWindowVisible=false`, and `mImeWindowVis=0`.
+  - Sample bytecode inspection with `javap` proved
+    `AiAppOkHttpAutoCapture.installBuilder(...)` is injected before
+    `OkHttpClient.Builder.build()`.
+  - Runtime OkHttp auto capture produced `source=okhttp-auto` GET and POST
+    records, including POST request/response bodies.
+  - Final native sample smoke passed status, SDK tree, UIAutomator tree,
+    screenshot, H5 DOM/click/input/wait/scroll, tap, input, dialog, capture
+    query, permission state, scroll, and back navigation.
+
 - Desktop CLI `0.1.8` was published to npm after local package validation.
   `npm view @lidongping/ai-app-bridge version` returned `0.1.8` after publish.
   The temporary npm token was removed from the working tree after use; because

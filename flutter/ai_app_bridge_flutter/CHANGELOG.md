@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Uses Android runtime 0.1.6 for debug builds.
+- Keeps OkHttp auto capture active for consumer app packages while excluding only bridge runtime/plugin internals.
+
 ## 0.1.5
 
 - Automatically includes the Android debug runtime from the Flutter plugin's Android debug variant.

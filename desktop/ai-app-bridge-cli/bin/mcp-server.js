@@ -164,6 +164,14 @@ function toolDefinitions() {
     bridgeTool('events', 'Read generic in-app event records.'),
     bridgeTool('uia_tree', 'Read UIAutomator XML for the current device window.'),
     bridgeTool('screenshot', 'Capture an ADB screenshot.'),
+    bridgeTool('install_apk', 'Install an APK through ADB while assisting device-side package-installer confirmation screens with UIAutomator.', {
+      apkPath: { type: 'string', description: 'Absolute or workspace-relative APK path.' },
+      allowDowngrade: { type: 'boolean', description: 'Pass -d to adb install.' },
+      streaming: { type: 'boolean', description: 'Use streaming install instead of the default --no-streaming mode.' },
+      installTimeoutMs: { type: 'number', description: 'Maximum time for adb install. Defaults to 180000 ms.' },
+      installerTimeoutMs: { type: 'number', description: 'Maximum time to keep assisting installer screens after adb install exits. Defaults to 90000 ms.' },
+      intervalMs: { type: 'number', description: 'Installer polling interval. Defaults to 700 ms.' },
+    }, ['apkPath']),
     bridgeTool('launch_native_test', 'Launch the debug native Android bridge test Activity.'),
     bridgeTool('launch_flutter', 'Launch the Flutter Activity, optionally with an initial route.'),
     bridgeTool('tap', 'Tap device coordinates through ADB.', {
@@ -172,6 +180,7 @@ function toolDefinitions() {
     }, ['tapX', 'tapY']),
     bridgeTool('tap_text', 'Tap the center of an Android View node by exact text or contentDescription.', {
       targetText: { type: 'string' },
+      noAutoHideKeyboard: { type: 'boolean', description: 'Disable the default keyboard-risk guard before tapping lower-screen app nodes.' },
     }, ['targetText']),
     bridgeTool('wait_text', 'Wait until text appears in status, Android tree, or UIAutomator tree.', {
       targetText: { type: 'string' },
@@ -179,7 +188,13 @@ function toolDefinitions() {
     }, ['targetText']),
     bridgeTool('input_text', 'Type text through ADB input.', {
       text: { type: 'string' },
+      hideKeyboard: { type: 'boolean', description: 'Hide the soft keyboard after typing.' },
     }, ['text']),
+    bridgeTool('keyboard_state', 'Read Android soft-keyboard visibility from dumpsys input_method.'),
+    bridgeTool('hide_keyboard', 'Hide the Android soft keyboard when it is visible.', {
+      force: { type: 'boolean', description: 'Send keyboard-dismiss keys even when the visibility probe says the keyboard is hidden.' },
+      intervalMs: { type: 'number', description: 'Delay between dismiss attempts. Defaults to 500 ms.' },
+    }),
     bridgeTool('swipe', 'Swipe device coordinates through ADB.', {
       startX: { type: 'number' },
       startY: { type: 'number' },
@@ -278,11 +293,14 @@ async function callTool(name, args) {
     flutter_h5_wait: 'flutter-h5-wait',
     flutter_h5_scroll: 'flutter-h5-scroll',
     uia_tree: 'uia-tree',
+    install_apk: 'install-apk',
     launch_native_test: 'launch-native-test',
     launch_flutter: 'launch-flutter',
     tap_text: 'tap-text',
     wait_text: 'wait-text',
     input_text: 'input-text',
+    keyboard_state: 'keyboard-state',
+    hide_keyboard: 'hide-keyboard',
     permission_state: 'permission-state',
     permission_grant: 'permission-grant',
     permission_revoke: 'permission-revoke',
@@ -299,16 +317,24 @@ async function runBridge(command, args) {
   addCommonArgs(cliArgs, args);
   addArg(cliArgs, 'initial-route', args.initialRoute);
   addArg(cliArgs, 'out-file', args.outFile);
+  addArg(cliArgs, 'apk-path', args.apkPath);
   addArg(cliArgs, 'tap-x', args.tapX);
   addArg(cliArgs, 'tap-y', args.tapY);
   addArg(cliArgs, 'target-text', args.targetText);
+  addArg(cliArgs, 'no-auto-hide-keyboard', args.noAutoHideKeyboard);
   addArg(cliArgs, 'timeout-sec', args.timeoutSec);
   addArg(cliArgs, 'text', args.text);
+  addArg(cliArgs, 'hide-keyboard', args.hideKeyboard);
+  addArg(cliArgs, 'force', args.force);
   addArg(cliArgs, 'start-x', args.startX);
   addArg(cliArgs, 'start-y', args.startY);
   addArg(cliArgs, 'end-x', args.endX);
   addArg(cliArgs, 'end-y', args.endY);
   addArg(cliArgs, 'duration-ms', args.durationMs);
+  addArg(cliArgs, 'allow-downgrade', args.allowDowngrade);
+  addArg(cliArgs, 'streaming', args.streaming);
+  addArg(cliArgs, 'install-timeout-ms', args.installTimeoutMs);
+  addArg(cliArgs, 'installer-timeout-ms', args.installerTimeoutMs);
   addArg(cliArgs, 'key-code', args.keyCode);
   addArg(cliArgs, 'permission', args.permission);
   addArg(cliArgs, 'op', args.op);

@@ -27,8 +27,15 @@ For unattended compatibility runs, validate at least:
 node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js status --package-name <package>
 node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js tree --package-name <package>
 node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js screenshot --package-name <package> --out-file <file>
+node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js keyboard-state --package-name <package>
+node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js install-apk --package-name <package> --apk-path <apk>
 ```
 
 Large Gradle apps should run under an external watchdog that records the last
 output timestamp, build process state, and APK artifact presence before killing
 a stale run.
+
+On ROMs with managed installers, `install-apk` should be exercised on both a
+fresh package install and a reinstall. The expected result should include
+`installMode=new_install` or `installMode=reinstall`, any installer button taps,
+and a final installed package state.

@@ -89,6 +89,148 @@ workaround when one exists.
 - Desired rule: user-facing docs should describe `18080` as the first attempted
   port, not a fixed endpoint.
 
+## ADB installs can block on one or more device-side confirmation screens
+
+- Status: desktop CLI support added; pending broad ROM/device verification
+- Found while validating: real Android app installs on ColorOS/OPPO-family
+  phones and other managed consumer devices.
+- Evidence:
+  - `adb install` can remain running while the phone displays an installer,
+    security scan, unknown-source, or risk confirmation page.
+  - Confirmation flows may have multiple steps, and button text varies by ROM,
+    language, and risk level, such as `继续安装`, `安装`, `允许`, `确定`,
+    `仍然安装`, `完成`, `打开`, or equivalent English labels.
+  - A successful-looking first confirmation is not enough. One observed manual
+    install flow required tapping `允许` first, then tapping a separate `完成`
+    screen before the device returned to a usable app state.
+  - In one observed ColorOS flow, UIAutomator reported package
+    `com.oplus.appdetail`, text `检测结果：涉及敏感权限`, and a clickable
+    `继续安装` button. Tapping that button allowed the waiting `adb install`
+    process to return `Success`.
+- Impact: an AI run can incorrectly classify installation as hung or timed out,
+  even though the device is waiting for a human confirmation. This breaks the
+  build-install-run verification loop before the app can be launched.
+- Desired behavior: the desktop loop should watch installer state while an
+  install command is pending, repeatedly read the active window through
+  UIAutomator, click known positive confirmation buttons, and continue after
+  `adb install` exits because some ROMs show a final `完成`/`打开` screen or
+  another confirmation step. The loop must treat install completion and
+  installer dismissal as two separate checks: the APK can be installed while
+  the UI is still waiting on `完成` or `打开`. The loop should stop only after
+  the app is installed and the installer UI has been dismissed or a real
+  blocker is detected.
+- Current workaround: manually run `uiautomator dump`, inspect the active
+  installer window, and tap the positive button coordinates with
+  `adb shell input tap`.
+- Added capability: `install-apk` now runs `adb install`, polls the current
+  installer surface with UIAutomator while the install process is pending,
+  taps known positive installer buttons such as `继续安装`, `仍然安装`, `安装`,
+  `允许`, `确定`, `完成`, and `打开`, then keeps polling briefly after
+  `adb install` exits because some ROMs leave a final installer page visible.
+  When `--package-name` is supplied, the command probes `pm path` before and
+  after install so the result can distinguish `new_install`, `reinstall`, or
+  `unknown_without_package_name`.
+- Remaining risk: the assistant intentionally handles confirmation buttons,
+  not arbitrary security-setting pages or vendor account policy pages. A ROM
+  that requires toggling an unknown-source switch, logging in, or accepting a
+  device-owner policy should still return a blocker rather than silently
+  changing device policy.
+- Regression note: OPPO/ColorOS can leave an app-market snack bar or downloader
+  page in the foreground after install. That surface must not be treated as an
+  installer finish screen even when it contains `打开` / `Open`; otherwise the
+  helper can trigger an unrelated market action instead of ending the install
+  loop.
+- Guardrail: button text alone is not a safe action contract. The installer
+  helper now treats system installer / risk-confirmation surfaces as the trusted
+  domain, checks whether the target package is already installed, and stops
+  clicking on installer finish, recommendation, or market surfaces. Generic
+  `安装` / `Install` buttons are not clicked on finish or market pages because
+  they can belong to ads or promoted apps.
+
+## Soft keyboard can obscure lower-screen targets after input
+
+- Status: desktop CLI guard added; pending device validation across IMEs
+- Found while using: agent-driven app flows that tap an input field, type text,
+  then repeatedly attempt to tap a lower-screen button while the soft keyboard
+  still covers that area.
+- Evidence:
+  - After `input-text`, the IME can stay visible and reduce the usable app
+    viewport.
+  - Bridge View tree coordinates may still describe the app layout behind the
+    keyboard, so a plain coordinate tap can hit the IME surface instead of the
+    intended app node.
+  - This causes retry loops that report the target as blocked or untappable,
+    even though the app state is otherwise correct.
+- Impact: AI runs can stall after form input, especially on login, search, and
+  checkout screens with primary actions near the bottom.
+- Desired behavior: keyboard visibility must be treated as a device state, not
+  as an app-tree failure. Before tapping a lower-screen app node, the desktop
+  loop should check whether the IME is visible, dismiss it when the target is
+  in the keyboard risk area, refresh the tree, and then tap the refreshed
+  coordinate. Direct text input should also offer an explicit "type then hide
+  keyboard" mode.
+- Added capability: `keyboard-state` reads `dumpsys input_method`,
+  `hide-keyboard` dismisses the IME with keyboard-safe key events, `input-text
+  --hide-keyboard` types and then hides the keyboard, and `tap-text` now
+  automatically hides the keyboard before tapping app nodes in the lower
+  viewport unless `--no-auto-hide-keyboard` is supplied. If the target is in
+  the keyboard risk area and the IME cannot be dismissed, `tap-text` returns
+  `keyboard_obscures_target` instead of pretending the tap succeeded.
+- Remaining risk: `dumpsys input_method` markers vary by Android release and
+  vendor IME. If a device reports stale or incomplete IME visibility, the guard
+  can miss the obstruction; screenshots/UIAutomator hierarchy should be used
+  as the next fallback signal for those devices.
+
+## OkHttp auto capture can be skipped when app package shares the bridge prefix
+
+- Status: fixed in Android Gradle plugin `0.1.6`
+- Found while validating: `examples/android-native-sample`
+- Evidence:
+  - The sample's `Run OkHttp Auto Capture` button executed successfully and
+    changed the page status to `OkHttp auto capture: HTTP 200`.
+  - `/v1/network` still had no `source=okhttp-auto` record.
+  - `javap` on the transformed sample class showed no call to
+    `AiAppOkHttpAutoCapture.installBuilder(...)` before
+    `OkHttpClient.Builder.build()`.
+  - The plugin excluded every class whose package started with
+    `io.github.lidongping.aiappbridge.`, which also excluded the sample app
+    package, not only bridge internals.
+- Impact: any consumer app whose package name reuses the bridge prefix can lose
+  OkHttp auto capture while manual SDK network recording still works.
+- Fix: the instrumentation exclusion now targets only bridge runtime/plugin
+  internals (`io.github.lidongping.aiappbridge.android.*` and
+  `io.github.lidongping.aiappbridge.gradle.*`). After rebuilding, `javap`
+  showed `installBuilder` injected before `Builder.build()`, and the sample
+  produced `source=okhttp-auto` GET and POST network records on device.
+
+## WebView H5 traffic is not captured by native OkHttp instrumentation
+
+- Status: open
+- Found while diagnosing: a hybrid Android app where a native login opens an H5
+  inventory page through WebView.
+- Evidence:
+  - Native login APIs were captured by the bridge network endpoint because they
+    went through the app's OkHttp stack.
+  - After entering the WebView inventory page, the bridge captured the H5 SDK
+    script download, but it did not expose H5 page XHR/fetch requests,
+    JavaScript console messages, or the exact return values passed through the
+    native JSBridge callbacks.
+  - The suspected failure surface was an H5-rendered `登录失败` message, so the
+    missing observability sits exactly at the boundary that needs diagnosis.
+- Impact: an AI run can prove that native login succeeded while still being
+  blind to the H5 page's own auth requests and JSBridge token/header exchange.
+  This can hide first-entry WebView bugs behind a misleading "native side looks
+  fine" result.
+- Desired behavior: the desktop loop should attach to the target app's WebView
+  DevTools socket when WebView debugging is enabled, collect console output,
+  page URL/title, and Network.request/response events, and correlate them with
+  bridge actions. It should also expose optional JSBridge tracing so calls such
+  as token/header getters can be matched to their callback payloads.
+- Current workaround: use `adb shell cat /proc/net/unix` to locate
+  `webview_devtools_remote_*`, forward it with `adb forward`, then inspect the
+  page through Chrome DevTools Protocol or add temporary app-side logs around
+  the JSBridge handlers.
+
 ## Android PopupWindow is not included in `/v1/view/tree`
 
 - Status: fixed in `0.1.3`

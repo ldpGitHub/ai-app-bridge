@@ -60,7 +60,8 @@ public abstract class OkHttpAutoCaptureClassVisitorFactory
     @Override
     public boolean isInstrumentable(ClassData classData) {
         String className = classData.getClassName();
-        return !className.startsWith("io.github.lidongping.aiappbridge.")
+        return !className.startsWith("io.github.lidongping.aiappbridge.android.")
+                && !className.startsWith("io.github.lidongping.aiappbridge.gradle.")
                 && !className.startsWith("okhttp3.")
                 && !className.startsWith("okio.")
                 && !className.startsWith("kotlin.")
