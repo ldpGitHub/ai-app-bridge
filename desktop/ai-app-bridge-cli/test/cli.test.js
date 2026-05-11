@@ -31,6 +31,7 @@ const {
   compactNetworkRecord,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
+  statusSearchText,
   uiautomatorLockPath,
   waitTextConditionsMet,
   withFileLock,
@@ -511,6 +512,33 @@ test('wait-text conditions require page context, activity, and absent text', () 
   assert.equal(waitTextConditionsMet(snapshot, 'Bridge Todo', {
     requireActivity: 'OtherActivity',
   }).reason, 'activity_mismatch');
+});
+
+test('wait-text status search ignores raw Flutter widget dump text', () => {
+  const text = statusSearchText({
+    activity: { current: 'dev.flutter.platform_design.MainActivity' },
+    flutter: {
+      layout: {
+        widgetDump: {
+          ok: true,
+          text: 'Offstage old route item Odd Bell',
+        },
+        operable: {
+          nodes: [
+            { widgetType: 'Text', text: 'Sad Word', actions: ['tap'] },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.match(text, /Sad Word/);
+  assert.doesNotMatch(text, /Odd Bell/);
+  assert.equal(waitTextConditionsMet(
+    { text, activity: 'dev.flutter.platform_design.MainActivity' },
+    'Sad Word',
+    { absentTexts: ['Odd Bell'], requireActivity: 'MainActivity' },
+  ).ok, true);
 });
 
 test('installer assistant recognises ROM installer surfaces and safe positive labels', () => {

@@ -4,6 +4,34 @@ This file records issues found while using ai-app-bridge as a development loop
 for real Android apps. Keep each item evidence-based and include the current
 workaround when one exists.
 
+## `wait-text` could match offstage Flutter widget dump text
+
+- Status: fixed in desktop CLI `0.1.20`
+- Found while validating:
+  `D:\TestProject\flutter-samples\platform_design`
+- Evidence:
+  - After `tap-text "Sad Word"` opened the song detail page,
+    `tap-text "Odd Bell"` correctly failed because `Odd Bell` was not in the
+    Android tree, UIAutomator tree, or current Flutter operable tree.
+  - The same screen returned `absent_text_present` for
+    `wait-text "Sad Word" --absent-text "Odd Bell"` because `wait-text`
+    searched the raw Flutter `widgetDump.text`, which still contained offstage
+    route/list text.
+  - `/v1/status` compact output showed current operable nodes contained
+    `Sad Word` and `You might also like:`, while `Odd Bell` was absent.
+- Impact: AI loops could reject a correct current-screen state or pass a stale
+  target check because `wait-text` treated debug-only Flutter dump text as
+  current visible text.
+- Fix: `wait-text` no longer searches raw Flutter widget dumps. Its status
+  search text is now built from app/activity metadata, current Flutter operable
+  nodes, and H5 DOM/control text.
+- Verification: desktop CLI `npm run check` passed 26 tests, including a
+  regression where `widgetDump.text` contains `Odd Bell` but the current
+  operable tree only contains `Sad Word`. On device `b46093e6`,
+  `wait-text "Sad Word" --absent-text "Odd Bell" --require-activity
+  MainActivity` passed on the detail page, while `tap-text "Odd Bell"` still
+  failed.
+
 ## `tap-text` could not operate Flutter-only controls
 
 - Status: fixed in desktop CLI `0.1.19`

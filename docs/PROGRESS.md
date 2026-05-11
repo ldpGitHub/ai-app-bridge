@@ -477,3 +477,15 @@
   `GET https://example.com/?ai_bridge_probe=2225` fetch with
   `Network.requestWillBeSent`, `Network.responseReceived`, HTTP `200`, and the
   WebView user agent/request headers.
+- Published desktop CLI `0.1.19` was revalidated against
+  `flutter-samples/platform_design`: `flutter test`, `flutter build apk
+  --debug`, reinstall, launch, `status`, screenshot, and generic
+  `tap-text "Sad Word"` all passed. The tap used `source=flutter-operable-tree`
+  and entered the detail page.
+- The same platform design run found and fixed another confirmed CLI issue:
+  `wait-text` searched raw Flutter `widgetDump.text`, so it could see offstage
+  list text such as `Odd Bell` after navigation. Desktop CLI `0.1.20` now
+  excludes raw widget dumps from `wait-text` search input and uses current
+  operable/H5 text instead. `npm run check` passed 26 tests, and the device
+  retest passed `wait-text "Sad Word" --absent-text "Odd Bell"` while
+  `tap-text "Odd Bell"` still failed as expected.

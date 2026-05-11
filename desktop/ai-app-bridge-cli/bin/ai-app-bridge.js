@@ -2998,7 +2998,7 @@ async function textSnapshot(ctx) {
     async () => {
       const status = await bridgeGet(ctx, '/v1/status');
       activity = String(status?.activity?.current || '');
-      return JSON.stringify(status);
+      return statusSearchText(status);
     },
     async () => JSON.stringify(await bridgeGet(ctx, '/v1/view/tree')),
     async () => await uiaTree(ctx),
@@ -3011,6 +3011,70 @@ async function textSnapshot(ctx) {
   return {
     text: parts.join('\n'),
     activity,
+  };
+}
+
+function statusSearchText(status) {
+  if (!status || typeof status !== 'object') return '';
+  const parts = [];
+  parts.push(JSON.stringify({
+    debugBridge: status.debugBridge,
+    app: status.app,
+    android: status.android,
+    activity: status.activity,
+    capture: status.capture,
+  }));
+  const flutter = status.flutter;
+  if (flutter && typeof flutter === 'object') {
+    parts.push(JSON.stringify({
+      app: flutter.app,
+      route: flutter.route,
+      h5: flutter.h5 ? flutterH5SearchObject(flutter.h5) : undefined,
+    }));
+    const nodes = Array.isArray(flutter.layout?.operable?.nodes) ? flutter.layout.operable.nodes : [];
+    for (const node of nodes) {
+      parts.push(JSON.stringify({
+        widgetType: node.widgetType,
+        text: node.text,
+        value: node.value,
+        actions: node.actions,
+      }));
+    }
+  }
+  return parts.join('\n');
+}
+
+function flutterH5SearchObject(h5) {
+  if (!h5 || typeof h5 !== 'object') return h5;
+  return {
+    active: h5.active,
+    adapterId: h5.adapterId,
+    source: h5.source,
+    currentUrl: h5.currentUrl,
+    progress: h5.progress,
+    title: h5.title,
+    dom: h5.dom ? {
+      ok: h5.dom.ok,
+      title: h5.dom.title,
+      url: h5.dom.url,
+      readyState: h5.dom.readyState,
+      bodyText: h5.dom.bodyText,
+      controls: Array.isArray(h5.dom.controls)
+        ? h5.dom.controls.map((control) => ({
+            tag: control.tag,
+            id: control.id,
+            name: control.name,
+            type: control.type,
+            role: control.role,
+            ariaLabel: control.ariaLabel,
+            placeholder: control.placeholder,
+            text: control.text,
+            href: control.href,
+            disabled: control.disabled,
+          }))
+        : h5.dom.controls,
+      controlCount: h5.dom.controlCount,
+    } : undefined,
   };
 }
 
@@ -3802,6 +3866,7 @@ module.exports = {
   compactNetworkRecord,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
+  statusSearchText,
   uiautomatorLockPath,
   waitTextConditionsMet,
   withFileLock,
