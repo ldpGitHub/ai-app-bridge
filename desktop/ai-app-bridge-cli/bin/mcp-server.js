@@ -105,7 +105,9 @@ async function handleMessage(body) {
 
 function toolDefinitions() {
   return [
-    bridgeTool('status', 'Read bridge status, app info, capture counts, and latest Flutter snapshot. If default port 18080 times out, agents should retry with the target Android packageName so the CLI can discover the app bridge port.'),
+    bridgeTool('status', 'Read compact bridge status, app info, capture counts, and Flutter layout summary. If default port 18080 times out, agents should retry with the target Android packageName so the CLI can discover the app bridge port.', {
+      full: { type: 'boolean', description: 'Return the full raw status payload, including large Flutter widget dumps.' },
+    }),
     bridgeTool('tree', 'Read the Android View tree from the in-app bridge.'),
     bridgeTool('flutter_tree', 'Read the latest Flutter widget/layout snapshot.'),
     bridgeTool('h5_dom', 'Read native Android WebView DOM from the current Activity.'),
@@ -381,6 +383,7 @@ async function runBridge(command, args) {
   addArg(cliArgs, 'method', args.method);
   addArg(cliArgs, 'status-code', args.statusCode);
   addArg(cliArgs, 'compact', args.compact);
+  addArg(cliArgs, 'full', args.full);
   addArg(cliArgs, 'no-bodies', args.noBodies);
   addArg(cliArgs, 'duration-ms', args.durationMs);
   addArg(cliArgs, 'include-response-body', args.includeResponseBody);

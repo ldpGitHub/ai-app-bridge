@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   buildBridgeFailureResult,
   compactBridgeTree,
+  compactStatus,
   compactUiaTree,
   defaultInstallerButtonTexts,
   findTappableNodeByText,
@@ -278,6 +279,59 @@ test('compacts UIAutomator tree by resource id and visible viewport', () => {
   assert.equal(compact.nodes.length, 1);
   assert.equal(compact.nodes[0].text, 'OpenAI');
   assert.equal(compact.nodes[0].resourceId, 'app:id/title');
+});
+
+test('status compacts large Flutter layout dumps by default', () => {
+  const status = compactStatus({
+    ok: true,
+    flutter: {
+      app: { name: 'platform_design' },
+      layout: {
+        widgetInspector: {
+          description: 'MyAdaptingApp',
+          type: '_ElementDiagnosticableTreeNode',
+          hasChildren: true,
+          children: [{ description: 'MaterialApp' }],
+        },
+        widgetDump: {
+          ok: true,
+          text: 'x'.repeat(5000),
+          length: 5000,
+          truncated: true,
+        },
+        semantics: {
+          ok: false,
+          error: 'no_root_semantics_node',
+          semanticsEnabled: true,
+        },
+        operable: {
+          ok: true,
+          count: 20,
+          visitedCount: 100,
+          textCount: 10,
+          actionCount: 40,
+          sampleWidgetTypes: Array.from({ length: 30 }, (_, index) => `Widget${index}`),
+          nodes: Array.from({ length: 20 }, (_, index) => ({
+            id: index,
+            widgetType: 'Text',
+            text: `Node ${index}`,
+            bounds: { left: 0, top: index, right: 10, bottom: index + 1 },
+            actions: ['tap'],
+            depth: index,
+            noisy: 'ignored',
+          })),
+        },
+      },
+    },
+  });
+
+  assert.equal(status.flutter.layout.widgetDump.ok, true);
+  assert.equal(status.flutter.layout.widgetDump.length, 5000);
+  assert.equal(Object.prototype.hasOwnProperty.call(status.flutter.layout.widgetDump, 'text'), false);
+  assert.equal(status.flutter.layout.widgetInspector.childCount, 1);
+  assert.equal(status.flutter.layout.operable.nodes.length, 12);
+  assert.equal(status.flutter.layout.operable.sampleWidgetTypes.length, 20);
+  assert.equal(Object.prototype.hasOwnProperty.call(status.flutter.layout.operable.nodes[0], 'noisy'), false);
 });
 
 test('uiautomator lock path is stable and filesystem-safe', () => {

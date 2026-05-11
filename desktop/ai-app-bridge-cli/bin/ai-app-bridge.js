@@ -68,6 +68,7 @@ Options:
   --status-code <n>      Keep network records with this HTTP status.
   --no-bodies            Omit requestBody/responseBody from network output.
   --body-max-bytes <n>   Truncate network request/response bodies.
+  --full                 Return full raw status output, including Flutter layout dumps.
   --compact              Return compact tree output for tree/uia-tree.
   --text-filter <s>      Keep compact tree nodes whose text/description contains this.
   --resource-id-filter <s> Keep compact tree nodes whose resource id/name contains this.
@@ -124,7 +125,7 @@ async function runCommand(command, options, ctx) {
       await adb(ctx, ['forward', '--remove', `tcp:${ctx.port}`]);
       return { ok: true, removed: `tcp:${ctx.port}` };
     case 'status':
-      return bridgeStatus(ctx);
+      return bridgeStatus(ctx, options);
     case 'tree':
       return bridgeTree(ctx, options);
     case 'flutter-tree': {
@@ -688,12 +689,110 @@ async function resolveDevicePort(ctx) {
   return { port: ctx.port, source: 'default-port' };
 }
 
-async function bridgeStatus(ctx) {
+async function bridgeStatus(ctx, options = {}) {
   try {
-    return await bridgeGet(ctx, '/v1/status');
+    const status = await bridgeGet(ctx, '/v1/status');
+    return booleanOption(options.full) ? status : compactStatus(status);
   } catch (error) {
     return buildBridgeFailureResult(ctx, 'status', '/v1/status', error);
   }
+}
+
+function compactStatus(status) {
+  if (!status || typeof status !== 'object') return status;
+  const next = { ...status };
+  if (status.flutter && typeof status.flutter === 'object') {
+    next.flutter = compactFlutterStatus(status.flutter);
+  }
+  return next;
+}
+
+function compactFlutterStatus(flutterStatus) {
+  const next = { ...flutterStatus };
+  if (flutterStatus.layout && typeof flutterStatus.layout === 'object') {
+    next.layout = compactFlutterLayout(flutterStatus.layout);
+  }
+  return next;
+}
+
+function compactFlutterLayout(layout) {
+  return {
+    updatedAtMs: layout.updatedAtMs,
+    widgetInspector: layout.widgetInspector ? compactDiagnosticTreeNode(layout.widgetInspector) : undefined,
+    widgetDump: compactWidgetDump(layout.widgetDump),
+    semantics: layout.semantics ? compactSemantics(layout.semantics) : undefined,
+    operable: layout.operable ? compactFlutterOperable(layout.operable) : undefined,
+  };
+}
+
+function compactDiagnosticTreeNode(node) {
+  if (!node || typeof node !== 'object') return node;
+  return {
+    description: shortStatusString(node.description),
+    type: shortStatusString(node.type),
+    hasChildren: Boolean(node.hasChildren),
+    childCount: Array.isArray(node.children) ? node.children.length : undefined,
+    createdByLocalProject: Boolean(node.createdByLocalProject),
+  };
+}
+
+function compactWidgetDump(widgetDump) {
+  if (!widgetDump || typeof widgetDump !== 'object') return widgetDump;
+  return {
+    ok: widgetDump.ok,
+    error: widgetDump.error,
+    truncated: widgetDump.truncated,
+    length: widgetDump.length,
+  };
+}
+
+function compactSemantics(semantics) {
+  if (!semantics || typeof semantics !== 'object') return semantics;
+  return {
+    ok: semantics.ok,
+    error: semantics.error,
+    semanticsEnabled: semantics.semanticsEnabled,
+    nodeCount: semantics.nodeCount,
+  };
+}
+
+function compactFlutterOperable(operable) {
+  if (!operable || typeof operable !== 'object') return operable;
+  return {
+    ok: operable.ok,
+    error: operable.error,
+    count: operable.count,
+    visitedCount: operable.visitedCount,
+    textCount: operable.textCount,
+    actionCount: operable.actionCount,
+    sampleWidgetTypes: Array.isArray(operable.sampleWidgetTypes)
+      ? operable.sampleWidgetTypes.slice(0, 20)
+      : operable.sampleWidgetTypes,
+    nodes: Array.isArray(operable.nodes)
+      ? operable.nodes.slice(0, 12).map(compactFlutterOperableNode)
+      : operable.nodes,
+    truncated: operable.truncated,
+    viewport: operable.viewport,
+    updatedAtMs: operable.updatedAtMs,
+  };
+}
+
+function compactFlutterOperableNode(node) {
+  if (!node || typeof node !== 'object') return node;
+  return {
+    id: node.id,
+    widgetType: shortStatusString(node.widgetType),
+    text: shortStatusString(node.text),
+    bounds: node.bounds,
+    actions: node.actions,
+    depth: node.depth,
+  };
+}
+
+function shortStatusString(value, maxLength = 160) {
+  if (value === undefined || value === null) return value;
+  const text = String(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...[truncated]` : text;
 }
 
 function buildBridgeFailureResult(ctx, command, requestPath, error) {
@@ -3629,6 +3728,7 @@ module.exports = {
   buildBridgeFailureResult,
   defaultInstallerButtonTexts,
   compactBridgeTree,
+  compactStatus,
   compactUiaTree,
   findTappableNodeByText,
   firstErrorLine,

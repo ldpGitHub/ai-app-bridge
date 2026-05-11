@@ -12,8 +12,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 typedef AiAppBridgeH5Evaluator = FutureOr<Object?> Function(String script);
-typedef AiAppBridgeH5MetadataProvider =
-    FutureOr<Map<String, Object?>> Function();
+typedef AiAppBridgeH5MetadataProvider = FutureOr<Map<String, Object?>>
+    Function();
 
 class AiAppBridgeH5Adapter {
   const AiAppBridgeH5Adapter({
@@ -107,7 +107,7 @@ class AiAppBridge {
   DebugPrintCallback? _previousDebugPrint;
   FlutterExceptionHandler? _previousFlutterErrorHandler;
   bool Function(Object error, StackTrace stackTrace)?
-  _previousPlatformErrorHandler;
+      _previousPlatformErrorHandler;
   HttpOverrides? _previousHttpOverrides;
   Map<String, Object?> _app = const <String, Object?>{};
   Map<String, Object?> _route = const <String, Object?>{};
@@ -201,9 +201,8 @@ class AiAppBridge {
       };
 
       _previousPlatformErrorHandler = PlatformDispatcher.instance.onError;
-      PlatformDispatcher
-          .instance
-          .onError = (Object error, StackTrace stackTrace) {
+      PlatformDispatcher.instance.onError =
+          (Object error, StackTrace stackTrace) {
         _recordAutomaticError(
           tag: 'FlutterPlatformError',
           source: 'PlatformDispatcher.onError',
@@ -588,12 +587,12 @@ class AiAppBridge {
         }
         final _ActionTarget? currentTapTarget =
             _isTapWidget(widgetType) && bounds != null
-            ? _ActionTarget(widgetType: widgetType, bounds: bounds)
-            : tapTarget;
+                ? _ActionTarget(widgetType: widgetType, bounds: bounds)
+                : tapTarget;
         final _ActionTarget? currentScrollTarget =
             _isScrollWidget(widgetType) && bounds != null
-            ? _ActionTarget(widgetType: widgetType, bounds: bounds)
-            : scrollTarget;
+                ? _ActionTarget(widgetType: widgetType, bounds: bounds)
+                : scrollTarget;
 
         final String text = _widgetText(widget);
         final String value = _widgetValue(widget);
@@ -664,7 +663,7 @@ class AiAppBridge {
         }
         visitedCount += 1;
         final Widget? widget = element?.widget;
-        final Rect? bounds = _globalBounds(element?.findRenderObject());
+        final Rect? bounds = _visibleGlobalBounds(element);
         _ActionTarget? nextTapTarget = tapTarget;
         _ActionTarget? nextScrollTarget = scrollTarget;
         if (widget != null) {
@@ -719,15 +718,15 @@ class AiAppBridge {
         visitedCount += 1;
         final Widget widget = element.widget;
         final String widgetType = widget.runtimeType.toString();
-        final Rect? bounds = _globalBounds(element.findRenderObject());
+        final Rect? bounds = _visibleGlobalBounds(element);
         final _ActionTarget? currentTapTarget =
             _isTapWidget(widgetType) && bounds != null
-            ? _ActionTarget(widgetType: widgetType, bounds: bounds)
-            : tapTarget;
+                ? _ActionTarget(widgetType: widgetType, bounds: bounds)
+                : tapTarget;
         final _ActionTarget? currentScrollTarget =
             _isScrollWidget(widgetType) && bounds != null
-            ? _ActionTarget(widgetType: widgetType, bounds: bounds)
-            : scrollTarget;
+                ? _ActionTarget(widgetType: widgetType, bounds: bounds)
+                : scrollTarget;
 
         collectNode(
           depth: depth,
@@ -1213,8 +1212,8 @@ class AiAppBridge {
   }
 
   Iterable<_RuntimeTarget> _runtimeTargets() sync* {
-    final List<_RuntimeTarget> inspectorTargets = _runtimeTargetsFromInspector()
-        .toList(growable: false);
+    final List<_RuntimeTarget> inspectorTargets =
+        _runtimeTargetsFromInspector().toList(growable: false);
     if (inspectorTargets.isNotEmpty) {
       yield* inspectorTargets;
       return;
@@ -1243,7 +1242,7 @@ class AiAppBridge {
       if (text.isEmpty) {
         continue;
       }
-      final Rect? bounds = _globalBounds(element.findRenderObject());
+      final Rect? bounds = _visibleGlobalBounds(element);
       if (bounds == null || bounds.isEmpty) {
         continue;
       }
@@ -1262,7 +1261,7 @@ class AiAppBridge {
       if (text.isEmpty) {
         continue;
       }
-      final Rect? bounds = _globalBounds(element.findRenderObject());
+      final Rect? bounds = _visibleGlobalBounds(element);
       if (bounds == null || bounds.isEmpty) {
         continue;
       }
@@ -1300,7 +1299,7 @@ class AiAppBridge {
       if (!_isInputWidget(element.widget.runtimeType.toString())) {
         continue;
       }
-      final Rect? bounds = _globalBounds(element.findRenderObject());
+      final Rect? bounds = _visibleGlobalBounds(element);
       if (bounds != null && !bounds.isEmpty) {
         return bounds.center;
       }
@@ -1318,7 +1317,7 @@ class AiAppBridge {
         return;
       }
       if (_isInputWidget(element.widget.runtimeType.toString())) {
-        final Rect? bounds = _globalBounds(element.findRenderObject());
+        final Rect? bounds = _visibleGlobalBounds(element);
         if (bounds != null && !bounds.isEmpty) {
           result = bounds.center;
           return;
@@ -1402,6 +1401,64 @@ class AiAppBridge {
     final Size physicalSize = view.physicalSize;
     final Size logicalSize = physicalSize / devicePixelRatio;
     return Offset.zero & logicalSize;
+  }
+
+  Rect? _visibleGlobalBounds(Element? element) {
+    if (element == null || _hasNonInteractiveAncestor(element)) {
+      return null;
+    }
+    final RenderObject? renderObject = element.findRenderObject();
+    final Rect? bounds = _globalBounds(renderObject);
+    if (bounds == null || bounds.isEmpty) {
+      return null;
+    }
+    final Rect viewport = _viewportRect();
+    if (!viewport.contains(bounds.center)) {
+      return null;
+    }
+    return _isHitTestReachable(renderObject, bounds.center) ? bounds : null;
+  }
+
+  bool _hasNonInteractiveAncestor(Element element) {
+    var blocked = false;
+    void inspect(Element candidate) {
+      final Widget widget = candidate.widget;
+      if (widget is Offstage && widget.offstage) {
+        blocked = true;
+      } else if (widget is Visibility && !widget.visible) {
+        blocked = true;
+      } else if (widget is IgnorePointer && widget.ignoring) {
+        blocked = true;
+      } else if (widget is AbsorbPointer && widget.absorbing) {
+        blocked = true;
+      }
+    }
+
+    inspect(element);
+    if (blocked) {
+      return true;
+    }
+    element.visitAncestorElements((Element ancestor) {
+      inspect(ancestor);
+      return !blocked;
+    });
+    return blocked;
+  }
+
+  bool _isHitTestReachable(RenderObject? renderObject, Offset point) {
+    if (renderObject == null || !renderObject.attached) {
+      return false;
+    }
+    try {
+      final HitTestResult result = HitTestResult();
+      // ignore: deprecated_member_use
+      GestureBinding.instance.hitTest(result, point);
+      return result.path.any(
+        (HitTestEntry entry) => identical(entry.target, renderObject),
+      );
+    } catch (_) {
+      return false;
+    }
   }
 
   double? _doubleValue(Object? value) {
@@ -1652,8 +1709,8 @@ class AiAppBridge {
         request.headers.contentType = ContentType.json;
         request.add(utf8.encode(body));
         final HttpClientResponse response = await request.close().timeout(
-          const Duration(milliseconds: 500),
-        );
+              const Duration(milliseconds: 500),
+            );
         await response.drain<void>();
       } catch (_) {
         // The native AI app bridge is optional and only exists in Android debug runs.
@@ -1850,8 +1907,7 @@ class _AiAppCapturedHttpClient implements HttpClient {
       Uri url,
       String? proxyHost,
       int? proxyPort,
-    )?
-    f,
+    )? f,
   ) {
     _delegate.connectionFactory = f;
   }
@@ -1864,7 +1920,7 @@ class _AiAppCapturedHttpClient implements HttpClient {
   @override
   set authenticateProxy(
     Future<bool> Function(String host, int port, String scheme, String? realm)?
-    f,
+        f,
   ) {
     _delegate.authenticateProxy = f;
   }
@@ -1906,7 +1962,7 @@ class _AiAppCapturedHttpClient implements HttpClient {
 
 class _AiAppCapturedHttpClientRequest implements HttpClientRequest {
   _AiAppCapturedHttpClientRequest(this._delegate, this._bridge)
-    : _startedAt = DateTime.now();
+      : _startedAt = DateTime.now();
 
   final HttpClientRequest _delegate;
   final AiAppBridge _bridge;
@@ -1996,9 +2052,8 @@ class _AiAppCapturedHttpClientRequest implements HttpClientRequest {
     final Map<String, Object?> requestHeaders = _headersToJson(
       _delegate.headers,
     );
-    final String? requestBody = _bodyPreview.isEmpty
-        ? null
-        : _bodyPreview.toString();
+    final String? requestBody =
+        _bodyPreview.isEmpty ? null : _bodyPreview.toString();
     try {
       final HttpClientResponse response = await _delegate.close();
       return _AiAppCapturedHttpClientResponse(
@@ -2112,13 +2167,13 @@ class _AiAppCapturedHttpClientResponse extends Stream<List<int>>
     required Map<String, Object?> requestHeaders,
     required String? requestBody,
     required DateTime startedAt,
-  }) : _bridge = bridge,
-       _method = method,
-       _uri = uri,
-       _requestHeaders = requestHeaders,
-       _requestBody = requestBody,
-       _startedAt = startedAt,
-       _captureResponseBody = _isPreviewableBody(_delegate.headers);
+  })  : _bridge = bridge,
+        _method = method,
+        _uri = uri,
+        _requestHeaders = requestHeaders,
+        _requestBody = requestBody,
+        _startedAt = startedAt,
+        _captureResponseBody = _isPreviewableBody(_delegate.headers);
 
   final HttpClientResponse _delegate;
   final AiAppBridge _bridge;
@@ -2192,9 +2247,9 @@ class _AiAppCapturedHttpClientResponse extends Stream<List<int>>
         },
         handleError:
             (Object error, StackTrace stackTrace, EventSink<List<int>> sink) {
-              _recordNetwork(error: error.toString());
-              sink.addError(error, stackTrace);
-            },
+          _recordNetwork(error: error.toString());
+          sink.addError(error, stackTrace);
+        },
         handleDone: (EventSink<List<int>> sink) {
           _recordNetwork();
           sink.close();
@@ -2223,9 +2278,8 @@ class _AiAppCapturedHttpClientResponse extends Stream<List<int>>
       requestHeaders: _requestHeaders,
       responseHeaders: _headersToJson(_delegate.headers),
       requestBody: _requestBody,
-      responseBody: _responseBodyPreview.isEmpty
-          ? null
-          : _responseBodyPreview.toString(),
+      responseBody:
+          _responseBodyPreview.isEmpty ? null : _responseBodyPreview.toString(),
       error: error,
     );
   }
@@ -2291,8 +2345,7 @@ class _AiAppBridgeHarnessPage extends StatefulWidget {
       _AiAppBridgeHarnessPageState();
 }
 
-class _AiAppBridgeHarnessPageState
-    extends State<_AiAppBridgeHarnessPage> {
+class _AiAppBridgeHarnessPageState extends State<_AiAppBridgeHarnessPage> {
   final TextEditingController _controller = TextEditingController();
   late final AiAppBridgeH5Adapter _h5FixtureAdapter;
   var _counter = 0;
@@ -2441,7 +2494,8 @@ class _AiAppBridgeHarnessPageState
   }
 
   void _recordAutoLogFixture() {
-    debugPrint('ai_app auto debugPrint fixture counter=$_counter input=$_input');
+    debugPrint(
+        'ai_app auto debugPrint fixture counter=$_counter input=$_input');
     FlutterError.reportError(
       FlutterErrorDetails(
         exception: StateError('ai_app auto flutter error fixture'),
@@ -2554,8 +2608,7 @@ class _AiAppBridgeHarnessPageState
         _h5FixtureScrollY += _doubleParam(params['deltaY']) ?? 480;
       });
     }
-    final Map<String, Object?> updatedTarget =
-        _findH5FixtureTarget(
+    final Map<String, Object?> updatedTarget = _findH5FixtureTarget(
           selector: selector,
           targetText: targetText,
           exact: params['exact'] == true,
@@ -2728,4 +2781,3 @@ extension _FirstWhereOrNull<T> on Iterable<T> {
     return null;
   }
 }
-

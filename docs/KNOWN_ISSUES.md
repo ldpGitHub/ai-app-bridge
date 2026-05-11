@@ -4,6 +4,46 @@ This file records issues found while using ai-app-bridge as a development loop
 for real Android apps. Keep each item evidence-based and include the current
 workaround when one exists.
 
+## CLI status can dump extremely large Flutter widget trees
+
+- Status: fixed in desktop CLI `0.1.18`
+- Found while validating: `D:\TestProject\flutter-samples\platform_design`
+- Evidence:
+  - `status --package-name dev.flutter.platform_design` returned a full
+    Flutter `widgetInspector` and `widgetDump.text`.
+  - One run produced roughly 2,300 output lines and more than 100k tool tokens
+    from a status command.
+- Impact: `status` became too noisy for CLI and MCP loops, wasting context and
+  hiding the actual app/debug metadata.
+- Fix: `status` now compacts Flutter layout by default, keeps bounded operable
+  node samples and widget dump length metadata, and exposes the raw response
+  only with `--full`.
+- Verification: desktop CLI `npm run check` passed 24 tests, including
+  `status compacts large Flutter layout dumps by default`; device `status`
+  against `platform_design` returned compact Flutter layout metadata without
+  the full dump text.
+
+## Flutter runtime can tap stale widgets from a previous route
+
+- Status: fixed in Flutter package `0.1.8`
+- Found while validating: `D:\TestProject\flutter-samples\platform_design`
+- Evidence:
+  - On the song list, `tap-flutter-text "Forest Nose"` opened its detail page.
+  - Before the fix, tapping another list item that belonged to the previous
+    route could return `ok=true` while the app stayed on the first detail page.
+  - The Flutter snapshot still included off-route list text nodes after
+    navigation.
+- Impact: an AI loop could believe it operated the current screen when it had
+  actually matched a stale/off-route Flutter element.
+- Fix: Flutter target extraction and runtime actions now require a target to
+  have usable bounds, a center inside the viewport, no obvious non-interactive
+  ancestors, and hit-test reachability at the tap point.
+- Verification: rebuilt and reinstalled `platform_design` with local
+  `ai_app_bridge_flutter 0.1.8`. After opening `Script Coin`, the compact
+  status contained only current detail targets, and
+  `tap-flutter-text "Tool Spot"` returned `text_not_found` instead of a
+  false successful tap.
+
 ## Android runtime 0.1.4 cannot be consumed by minSdk 21 apps
 
 - Status: fixed and remotely verified for `0.1.5`

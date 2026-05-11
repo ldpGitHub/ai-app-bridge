@@ -2,6 +2,21 @@
 
 ## 2026-05-12
 
+- `platform_design` was revalidated as a real Flutter target from
+  `D:\TestProject\flutter-samples\platform_design` using a local path
+  dependency on `flutter/ai_app_bridge_flutter`.
+  `flutter analyze --no-pub`, `flutter build apk --debug --no-pub`, and
+  `install-apk --package-name dev.flutter.platform_design` all passed on
+  device `b46093e6`.
+- Desktop CLI `0.1.18` fixes the excessive Flutter `status` output found in
+  that run. Default `status` now returns compact layout metadata; `--full`
+  keeps the raw response available. `npm run check` passed 24 tests.
+- Flutter package `0.1.8` fixes stale/off-route Flutter target matching.
+  Before the fix, a song detail page could still report a previous list item
+  tap as `ok=true`. After the fix, opening `Script Coin` and then tapping old
+  list text `Tool Spot` returned `text_not_found`, and compact status only
+  exposed current detail targets.
+
 - Desktop CLI `0.1.17` adds a host-side cross-process lock around
   `uiautomator dump`. A Now in Android validation pass reproduced the device
   failure mode by running `wait-text` and multiple `uia-tree` commands in

@@ -4,6 +4,8 @@
 
 - Uses Android runtime 0.1.8 for debug builds.
 - Skips obvious non-text OkHttp request/response bodies in automatic capture.
+- Filters Flutter runtime targets through viewport and hit-test reachability so
+  stale/off-route widget nodes are not tapped after navigation.
 
 ## 0.1.7
 
