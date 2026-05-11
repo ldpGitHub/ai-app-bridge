@@ -23,6 +23,11 @@
   proved `/v1/state` now returns the full string
   `Flutter probe run #1`; the WebView CDP fetch/console path still passed with
   `https://httpbin.org/get?from=heartbeat-2055-after-state-fix`.
+- Flutter `ai_app_bridge_flutter 0.1.9` was published to pub.dev after a
+  zero-warning `flutter pub publish --dry-run`. Post-publish validation switched
+  the same example to hosted `ai_app_bridge_flutter: ^0.1.9`; `flutter pub get`,
+  `flutter analyze --no-pub`, `flutter build apk --debug --no-pub`,
+  `install-apk`, and the state string assertion all passed.
 
 - `platform_design` was revalidated as a real Flutter target from
   `D:\TestProject\flutter-samples\platform_design` using a local path

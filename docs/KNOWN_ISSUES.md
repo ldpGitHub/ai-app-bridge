@@ -27,7 +27,11 @@ workaround when one exists.
 - Verification: rebuilt and reinstalled the example with local
   `ai_app_bridge_flutter 0.1.9`; after tapping `Run AI Bridge Probe`,
   `/v1/state` returned
-  `ai_bridge_probe.status_text: "Flutter probe run #1"`.
+  `ai_bridge_probe.status_text: "Flutter probe run #1"`. After publishing,
+  the example was switched back to hosted `ai_app_bridge_flutter: ^0.1.9`;
+  `flutter pub get`, `flutter analyze --no-pub`,
+  `flutter build apk --debug --no-pub`, `install-apk`, and the same state
+  assertion all passed.
 
 ## CLI status can dump extremely large Flutter widget trees
 
