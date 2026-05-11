@@ -194,7 +194,7 @@ class AiAppBridgeFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.Met
                 payload.optString("level", "info"),
                 payload.optString("tag", ""),
                 payload.optString("message", ""),
-                if (payload.has("data")) payload.opt("data")?.toString() else null,
+                payload.optJsonString("data"),
             )
         }
     }
@@ -270,7 +270,7 @@ class AiAppBridgeFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.Met
                 null,
                 payload.optString("namespace", "app"),
                 payload.optString("key", "value"),
-                if (payload.has("value")) payload.opt("value")?.toString() else null,
+                payload.optJsonString("value"),
             )
         }
     }
@@ -288,7 +288,7 @@ class AiAppBridgeFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.Met
                 null,
                 payload.optString("category", "app"),
                 payload.optString("name", "event"),
-                if (payload.has("data")) payload.opt("data")?.toString() else null,
+                payload.optJsonString("data"),
             )
         }
     }
@@ -319,7 +319,11 @@ class AiAppBridgeFlutterPlugin : FlutterPlugin, ActivityAware, MethodChannel.Met
         if (!has(key) || isNull(key)) {
             return null
         }
-        return opt(key)?.toString()
+        val value = opt(key) ?: return null
+        return when (value) {
+            is String -> JSONObject.quote(value)
+            else -> value.toString()
+        }
     }
 
     companion object {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9
+
+- Preserves string values with spaces when Flutter capture APIs forward
+  `recordState`, `recordLog(data)`, and `recordEvent(data)` through the Android
+  MethodChannel bridge.
+
 ## 0.1.8
 
 - Uses Android runtime 0.1.8 for debug builds.

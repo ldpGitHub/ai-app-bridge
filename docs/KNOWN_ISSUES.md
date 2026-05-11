@@ -4,6 +4,31 @@ This file records issues found while using ai-app-bridge as a development loop
 for real Android apps. Keep each item evidence-based and include the current
 workaround when one exists.
 
+## Flutter capture strings with spaces can be truncated through MethodChannel
+
+- Status: fixed in Flutter package `0.1.9`
+- Found while validating:
+  `D:\TestProject\flutter_inappwebview\flutter_inappwebview_android\example`
+- Evidence:
+  - The example called `recordState(namespace: "ai_bridge_probe",
+    key: "status_text", value: "Flutter probe run #1")`.
+  - `/v1/logs` preserved the full log data string
+    `Flutter probe run #1`.
+  - `/v1/state` returned `ai_bridge_probe.status_text: "Flutter"` when the
+    example used published `ai_app_bridge_flutter 0.1.8`.
+- Impact: AI loops that rely on Flutter `recordState` could see a false
+  current state whenever the value was a plain string containing spaces.
+- Cause: the Flutter plugin Android shim passed `payload.opt("value").toString()`
+  into Android runtime methods that expect a JSON value string. Android's
+  `JSONTokener` accepted only the first token from the unquoted string.
+- Fix: the Flutter plugin now serializes MethodChannel capture payload values
+  as valid JSON. String values are quoted with `JSONObject.quote`, while
+  object, array, number, and boolean values keep their JSON representation.
+- Verification: rebuilt and reinstalled the example with local
+  `ai_app_bridge_flutter 0.1.9`; after tapping `Run AI Bridge Probe`,
+  `/v1/state` returned
+  `ai_bridge_probe.status_text: "Flutter probe run #1"`.
+
 ## CLI status can dump extremely large Flutter widget trees
 
 - Status: fixed in desktop CLI `0.1.18`

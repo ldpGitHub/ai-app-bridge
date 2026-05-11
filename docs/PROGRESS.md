@@ -2,6 +2,28 @@
 
 ## 2026-05-12
 
+- `flutter_inappwebview_android/example` was revalidated against the published
+  Flutter package path first: `flutter pub get` resolved hosted
+  `ai_app_bridge_flutter 0.1.8`, `flutter analyze --no-pub` passed,
+  `flutter build apk --debug --no-pub` passed, and `install-apk` completed as
+  `installMode=reinstall`.
+- The same WebView validation operated the Flutter button and H5 callback
+  closure: `tap-flutter-text "Run AI Bridge Probe"` updated the H5 page,
+  `flutter-h5-click --selector "#h5-event-button"` returned `ok=true`,
+  `/v1/logs`, `/v1/state`, and `/v1/events` all exposed the probe records, and
+  `webview-network` captured an H5 `fetch` to
+  `https://httpbin.org/get?from=heartbeat-2055-webview-cdp` with method `GET`,
+  HTTP status `200`, response body, `Network.requestWillBeSent`,
+  `Network.responseReceived`, and console message
+  `AI_BRIDGE_STRESS_CDP_RESPONSE 200`.
+- That run confirmed a Flutter package bug: `recordState(... value:
+  "Flutter probe run #1")` arrived in `/v1/state` as `"Flutter"` through the
+  MethodChannel path. Flutter package `0.1.9` fixes MethodChannel capture value
+  serialization. Rebuilding and reinstalling the example with local `0.1.9`
+  proved `/v1/state` now returns the full string
+  `Flutter probe run #1`; the WebView CDP fetch/console path still passed with
+  `https://httpbin.org/get?from=heartbeat-2055-after-state-fix`.
+
 - `platform_design` was revalidated as a real Flutter target from
   `D:\TestProject\flutter-samples\platform_design` using a local path
   dependency on `flutter/ai_app_bridge_flutter`.
