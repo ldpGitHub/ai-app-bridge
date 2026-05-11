@@ -39,6 +39,7 @@ test('--help prints usage without probing adb', () => {
   assert.equal(output, `${helpText}\n`);
   assert.match(output, /Usage: ai-app-bridge <command>/);
   assert.match(output, /--package-name <name>/);
+  assert.match(output, /--text <text>\s+Text used by input-text\./);
 });
 
 test('help command prints usage without probing adb', () => {

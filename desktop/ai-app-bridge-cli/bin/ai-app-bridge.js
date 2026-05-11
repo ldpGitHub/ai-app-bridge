@@ -44,6 +44,7 @@ Options:
   --adb-timeout-ms <ms>  Timeout for ADB subprocesses.
   --out-file <path>      Screenshot output path.
   --apk-path <path>      APK path used by install-apk.
+  --text <text>          Text used by input-text.
   --target-text <text>   Text used by tap-text or wait-text.
   --require-text <text>  Extra text that must be present for wait-text.
   --absent-text <text>   Text that must be absent for wait-text.
