@@ -7,6 +7,7 @@ const path = require('path');
 
 const defaults = {
   adb: process.env.ADB || 'adb',
+  adbTimeoutMs: Number(process.env.AI_APP_BRIDGE_ADB_TIMEOUT_MS || 15000),
   serial: '',
   port: 18080,
   packageName: 'io.github.lidongping.aiappbridge.sample',
@@ -14,19 +15,52 @@ const defaults = {
   flutterActivity: '.MainActivity',
 };
 
-main().catch((error) => {
-  console.error(error.stack || error.message || String(error));
-  process.exitCode = 1;
-});
+const helpText = `Usage: ai-app-bridge <command> [options]
+
+Commands:
+  status                 Read bridge status and app/device metadata.
+  tree                   Read the Android View tree from the in-app bridge.
+  flutter-tree           Read the latest Flutter layout snapshot.
+  uia-tree               Read UIAutomator XML for the current foreground window.
+  screenshot             Capture an ADB screenshot.
+  tap-text               Tap a visible node by exact text or content description.
+  wait-text              Wait until text appears in bridge or UIAutomator output.
+  input-text             Type text through ADB input.
+  smoke                  Run the native sample smoke test.
+  help                   Show this help.
+
+Options:
+  --package-name <name>  Target Android package; discovers its bridge port via run-as.
+  --port <port>          Override bridge local/device port.
+  --serial <serial>      Target a specific ADB device.
+  --adb <path>           ADB executable path.
+  --adb-timeout-ms <ms>  Timeout for ADB subprocesses.
+  --out-file <path>      Screenshot output path.
+  --target-text <text>   Text used by tap-text or wait-text.
+  --help                 Show this help without touching ADB or the device.`;
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message || String(error));
+    process.exitCode = 1;
+  });
+}
 
 async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
+  if (options.help || command === 'help') {
+    process.stdout.write(`${helpText}\n`);
+    return;
+  }
+
   const ctx = {
     adb: options.adb || defaults.adb,
+    adbTimeoutMs: Number(options.adbTimeoutMs || defaults.adbTimeoutMs),
     serial: options.serial || defaults.serial,
     port: Number(options.port || defaults.port),
     explicitPort: options.port !== undefined,
     packageName: options.packageName || defaults.packageName,
+    explicitPackageName: options.packageName !== undefined,
     nativeActivity: options.nativeActivity || defaults.nativeActivity,
     flutterActivity: options.flutterActivity || defaults.flutterActivity,
   };
@@ -52,7 +86,7 @@ async function runCommand(command, options, ctx) {
       await adb(ctx, ['forward', '--remove', `tcp:${ctx.port}`]);
       return { ok: true, removed: `tcp:${ctx.port}` };
     case 'status':
-      return bridgeGet(ctx, '/v1/status');
+      return bridgeStatus(ctx);
     case 'tree':
       return bridgeGet(ctx, '/v1/view/tree');
     case 'flutter-tree': {
@@ -188,9 +222,13 @@ async function adb(ctx, args, { binary = false } = {}) {
     execFile(ctx.adb, allArgs, {
       encoding: binary ? 'buffer' : 'utf8',
       maxBuffer: 64 * 1024 * 1024,
+      timeout: ctx.adbTimeoutMs || defaults.adbTimeoutMs,
       windowsHide: true,
     }, (error, stdout, stderr) => {
       if (error) {
+        if (error.killed || error.signal) {
+          error.message = `adb timed out after ${ctx.adbTimeoutMs || defaults.adbTimeoutMs}ms: ${ctx.adb} ${allArgs.join(' ')}`;
+        }
         error.message = `${error.message}\n${stderr || ''}`;
         reject(error);
         return;
@@ -209,12 +247,16 @@ async function adbBinaryToFile(ctx, args, outFile) {
     const child = spawn(ctx.adb, allArgs, { windowsHide: true });
     const output = fs.createWriteStream(outFile);
     let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill();
+    }, ctx.adbTimeoutMs || defaults.adbTimeoutMs);
     child.stdout.pipe(output);
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
     child.on('error', reject);
     child.on('close', (code) => {
+      clearTimeout(timeout);
       output.close(() => {
         if (code !== 0) {
           reject(new Error(`adb failed with exit code ${code}: ${stderr}`));
@@ -227,37 +269,143 @@ async function adbBinaryToFile(ctx, args, outFile) {
 }
 
 async function ensureForward(ctx) {
-  const devicePort = await resolveDevicePort(ctx);
-  await adb(ctx, ['forward', `tcp:${ctx.port}`, `tcp:${devicePort}`]);
+  const resolvedPort = await resolveDevicePort(ctx);
+  const devicePort = resolvedPort.port;
+  const hostPort = ctx.explicitPort ? ctx.port : devicePort;
   ctx.devicePort = devicePort;
-  return { ok: true, forward: `tcp:${ctx.port} -> device tcp:${devicePort}` };
+  ctx.hostPort = hostPort;
+  ctx.devicePortSource = resolvedPort.source;
+  ctx.devicePortState = resolvedPort.state;
+  ctx.devicePortError = resolvedPort.error;
+  await adb(ctx, ['forward', `tcp:${hostPort}`, `tcp:${devicePort}`]);
+  return {
+    ok: true,
+    forward: `tcp:${hostPort} -> device tcp:${devicePort}`,
+    hostPort,
+    devicePort,
+    devicePortSource: resolvedPort.source,
+  };
 }
 
 async function resolveDevicePort(ctx) {
-  if (ctx.explicitPort) return ctx.port;
+  if (ctx.explicitPort) return { port: ctx.port, source: 'explicit-port' };
   try {
     const result = await adb(ctx, ['shell', 'run-as', ctx.packageName, 'cat', 'files/ai_app_bridge_port.json']);
     const state = JSON.parse(result.stdout.trim());
     const discoveredPort = Number(state.port);
     if (state.ok === true && Number.isInteger(discoveredPort) && discoveredPort > 0) {
-      return discoveredPort;
+      return { port: discoveredPort, source: 'package-port-file', state };
     }
-  } catch (_) {
+  } catch (error) {
     // Fall back to the historical default port for older bridge versions.
+    return {
+      port: ctx.port,
+      source: 'default-port',
+      error: firstErrorLine(error),
+    };
   }
-  return ctx.port;
+  return { port: ctx.port, source: 'default-port' };
+}
+
+async function bridgeStatus(ctx) {
+  try {
+    return await bridgeGet(ctx, '/v1/status');
+  } catch (error) {
+    return buildBridgeFailureResult(ctx, 'status', '/v1/status', error);
+  }
+}
+
+function buildBridgeFailureResult(ctx, command, requestPath, error) {
+  const normalized = normalizeBridgeError(error);
+  return {
+    ok: false,
+    command,
+    requestPath,
+    error: normalized.code,
+    message: normalized.message,
+    packageName: ctx.packageName,
+    attempted: {
+      host: '127.0.0.1',
+      localPort: ctx.hostPort || ctx.port,
+      devicePort: ctx.devicePort || ctx.port,
+      devicePortSource: ctx.devicePortSource || (ctx.explicitPort ? 'explicit-port' : 'unknown'),
+      portState: ctx.devicePortState || null,
+      portDiscoveryError: ctx.devicePortError || null,
+      url: bridgeUrl(ctx, requestPath),
+    },
+    suggestion: normalized.suggestion,
+  };
+}
+
+function normalizeBridgeError(error) {
+  const message = firstErrorLine(error);
+  const code = error?.code || '';
+  const lower = message.toLowerCase();
+  if (
+    code === 'ECONNRESET' ||
+    lower.includes('socket hang up') ||
+    lower.includes('connection reset') ||
+    lower.includes('http timeout')
+  ) {
+    return {
+      code: 'bridge_not_ready',
+      message,
+      suggestion: 'Launch the target app, wait for the debug bridge to start, then retry status.',
+    };
+  }
+  if (code === 'ECONNREFUSED' || lower.includes('econnrefused') || lower.includes('connection refused')) {
+    return {
+      code: 'bridge_connection_refused',
+      message,
+      suggestion: 'Confirm the target app is running and that the resolved bridge port belongs to this package.',
+    };
+  }
+  if (lower.includes('adb timed out')) {
+    return {
+      code: 'adb_timeout',
+      message,
+      suggestion: 'Check the device state and retry; if the bridge port is known, pass --port to skip package port discovery.',
+    };
+  }
+  if (lower.includes('run-as') || lower.includes('package not found')) {
+    return {
+      code: 'bridge_port_discovery_failed',
+      message,
+      suggestion: 'Install a debuggable build for the requested package or pass --port explicitly.',
+    };
+  }
+  if (lower.includes('adb forward')) {
+    return {
+      code: 'bridge_forward_failed',
+      message,
+      suggestion: 'Remove stale adb forwards or pass a different --port for this target package.',
+    };
+  }
+  return {
+    code: 'bridge_request_failed',
+    message,
+    suggestion: 'Check that the device is connected, the target package is installed, and the app is foreground or recently launched.',
+  };
+}
+
+function firstErrorLine(error) {
+  return String(error?.message || error || 'unknown_error').split(/\r?\n/).find(Boolean) || 'unknown_error';
 }
 
 async function bridgeGet(ctx, requestPath) {
   await ensureForward(ctx);
-  const body = await httpGet(`http://127.0.0.1:${ctx.port}${requestPath}`);
+  const body = await httpGet(bridgeUrl(ctx, requestPath));
   return JSON.parse(body);
 }
 
 async function bridgePost(ctx, requestPath, payload) {
   await ensureForward(ctx);
-  const body = await httpPost(`http://127.0.0.1:${ctx.port}${requestPath}`, payload);
+  const body = await httpPost(bridgeUrl(ctx, requestPath), payload);
   return JSON.parse(body);
+}
+
+function bridgeUrl(ctx, requestPath) {
+  return `http://127.0.0.1:${ctx.hostPort || ctx.port}${requestPath}`;
 }
 
 function httpGet(url) {
@@ -279,7 +427,10 @@ function httpGet(url) {
     request.on('timeout', () => {
       request.destroy(new Error(`HTTP timeout: ${url}`));
     });
-    request.on('error', reject);
+    request.on('error', (error) => {
+      error.url = url;
+      reject(error);
+    });
   });
 }
 
@@ -310,7 +461,10 @@ function httpPost(url, payload) {
     request.on('timeout', () => {
       request.destroy(new Error(`HTTP timeout: ${url}`));
     });
-    request.on('error', reject);
+    request.on('error', (error) => {
+      error.url = url;
+      reject(error);
+    });
     request.write(body);
     request.end();
   });
@@ -343,16 +497,30 @@ async function uiaTree(ctx) {
 }
 
 async function screenshot(ctx, outFile) {
+  const foreground = await foregroundWindow(ctx);
   const resolvedPath = await adbBinaryToFile(ctx, ['exec-out', 'screencap', '-p'], outFile);
   const size = pngSize(resolvedPath);
-  return {
+  const result = {
     ok: true,
     transport: 'adb',
     mimeType: 'image/png',
     path: resolvedPath,
     width: size.width,
     height: size.height,
+    foreground,
   };
+  if (ctx.packageName) {
+    result.targetPackageName = ctx.packageName;
+  }
+  if (ctx.explicitPackageName && foreground.packageName) {
+    result.foregroundMatchesPackage = foreground.packageName === ctx.packageName;
+    if (!result.foregroundMatchesPackage) {
+      result.ok = false;
+      result.error = 'foreground_package_mismatch';
+      result.warning = `screenshot captured foreground package ${foreground.packageName}, not requested package ${ctx.packageName}`;
+    }
+  }
+  return result;
 }
 
 function pngSize(filePath) {
@@ -364,6 +532,65 @@ function pngSize(filePath) {
   };
 }
 
+async function foregroundWindow(ctx) {
+  try {
+    const result = await adb(ctx, ['shell', 'dumpsys', 'window']);
+    return parseForegroundWindow(result.stdout);
+  } catch (error) {
+    return {
+      ok: false,
+      error: 'foreground_probe_failed',
+      message: firstErrorLine(error),
+    };
+  }
+}
+
+function parseForegroundWindow(raw) {
+  const lines = String(raw || '').split(/\r?\n/);
+  const markers = [
+    'mCurrentFocus',
+    'mTopResumedActivity',
+    'mResumedActivity',
+    'mFocusedApp',
+  ];
+  for (const marker of markers) {
+    const line = lines.find((item) => item.includes(marker));
+    if (!line) continue;
+    const component = parseComponentFromWindowLine(line);
+    if (!component) continue;
+    return {
+      ok: true,
+      source: marker,
+      packageName: component.packageName,
+      activity: component.activity,
+      component: component.component,
+      raw: line.trim(),
+    };
+  }
+  return {
+    ok: false,
+    error: 'foreground_not_found',
+  };
+}
+
+function parseComponentFromWindowLine(line) {
+  const componentRegex = /([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\/(\.?[A-Za-z0-9_.$]+(?:\.[A-Za-z0-9_.$]+)*)/g;
+  let match;
+  let lastMatch = null;
+  while ((match = componentRegex.exec(line)) !== null) {
+    lastMatch = match;
+  }
+  if (!lastMatch) return null;
+  const packageName = lastMatch[1];
+  const rawActivity = lastMatch[2];
+  const activity = rawActivity.startsWith('.') ? `${packageName}${rawActivity}` : rawActivity;
+  return {
+    packageName,
+    activity,
+    component: `${packageName}/${rawActivity}`,
+  };
+}
+
 async function tap(ctx, x, y) {
   await adb(ctx, ['shell', 'input', 'tap', String(x), String(y)]);
   return { ok: true, transport: 'adb', x, y };
@@ -371,16 +598,36 @@ async function tap(ctx, x, y) {
 
 async function tapText(ctx, targetText) {
   const tree = await bridgeGet(ctx, '/v1/view/tree');
-  const node = findNodeByText(tree.root, targetText);
+  const bridgeMatch = findTappableNodeByText(tree, targetText);
+  const node = bridgeMatch.node;
   if (node?.bounds) {
     const x = Math.round((node.bounds.left + node.bounds.right) / 2);
     const y = Math.round((node.bounds.top + node.bounds.bottom) / 2);
     await tap(ctx, x, y);
-    return { ok: true, transport: 'adb', targetText, source: 'bridge-tree', x, y };
+    return {
+      ok: true,
+      transport: 'adb',
+      targetText,
+      source: 'bridge-tree',
+      windowType: bridgeMatch.windowType,
+      x,
+      y,
+    };
   }
 
   const uiaNode = findUiaNodeByText(await uiaTree(ctx), targetText);
   if (!uiaNode) {
+    if (bridgeMatch.rejected) {
+      return {
+        ok: false,
+        error: 'bridge_tree_node_not_tappable',
+        targetText,
+        source: 'bridge-tree',
+        reason: bridgeMatch.rejected.reason,
+        bounds: bridgeMatch.rejected.node.bounds || null,
+        viewport: bridgeMatch.rejected.viewport || null,
+      };
+    }
     throw new Error(`text not found in Android bridge tree or UIAutomator tree: ${targetText}`);
   }
   const x = Math.round((uiaNode.left + uiaNode.right) / 2);
@@ -389,14 +636,90 @@ async function tapText(ctx, targetText) {
   return { ok: true, transport: 'adb', targetText, source: 'uiautomator', x, y };
 }
 
-function findNodeByText(node, targetText) {
-  if (!node) return null;
-  if (node.text === targetText || node.contentDescription === targetText) return node;
-  for (const child of node.children || []) {
-    const found = findNodeByText(child, targetText);
-    if (found) return found;
+function findTappableNodeByText(tree, targetText) {
+  const roots = [];
+  const windows = Array.isArray(tree?.windows) ? tree.windows : [];
+  for (const windowInfo of windows.slice().reverse()) {
+    if (windowInfo?.root) {
+      roots.push({
+        root: windowInfo.root,
+        viewport: windowInfo.bounds || windowInfo.root.bounds || null,
+        windowType: windowInfo.type || 'window',
+      });
+    }
   }
-  return null;
+  if (tree?.root) {
+    roots.push({
+      root: tree.root,
+      viewport: tree.root.bounds || null,
+      windowType: 'activity',
+    });
+  }
+
+  let rejected = null;
+  for (const rootInfo of roots) {
+    const result = findNodeByText(rootInfo.root, targetText, rootInfo.viewport);
+    if (result.node) {
+      return {
+        node: result.node,
+        windowType: rootInfo.windowType,
+        viewport: rootInfo.viewport,
+        rejected,
+      };
+    }
+    rejected = rejected || result.rejected;
+  }
+  return { node: null, rejected };
+}
+
+function findNodeByText(node, targetText, viewport = null) {
+  if (!node) return { node: null, rejected: null };
+  if (node.text === targetText || node.contentDescription === targetText) {
+    const state = nodeTapState(node, viewport);
+    if (state.ok) {
+      return { node, rejected: null };
+    }
+    return {
+      node: null,
+      rejected: {
+        node,
+        viewport,
+        reason: state.reason,
+      },
+    };
+  }
+  let rejected = null;
+  for (const child of node.children || []) {
+    const found = findNodeByText(child, targetText, viewport);
+    if (found.node) return found;
+    rejected = rejected || found.rejected;
+  }
+  return { node: null, rejected };
+}
+
+function nodeTapState(node, viewport) {
+  const bounds = node?.bounds;
+  if (!bounds) return { ok: false, reason: 'missing_bounds' };
+  if (node.visible === false || node.effectiveVisible === false) {
+    return { ok: false, reason: 'not_effectively_visible' };
+  }
+  const width = Number(bounds.width ?? bounds.right - bounds.left);
+  const height = Number(bounds.height ?? bounds.bottom - bounds.top);
+  if (width <= 0 || height <= 0) {
+    return { ok: false, reason: 'empty_bounds' };
+  }
+  if (!viewport) return { ok: true };
+  const centerX = (Number(bounds.left) + Number(bounds.right)) / 2;
+  const centerY = (Number(bounds.top) + Number(bounds.bottom)) / 2;
+  if (
+    centerX < Number(viewport.left) ||
+    centerX > Number(viewport.right) ||
+    centerY < Number(viewport.top) ||
+    centerY > Number(viewport.bottom)
+  ) {
+    return { ok: false, reason: 'center_outside_viewport' };
+  }
+  return { ok: true };
 }
 
 function findUiaNodeByText(xml, targetText) {
@@ -1287,8 +1610,8 @@ async function smoke(ctx, options) {
 
   const tree = await bridgeGet(ctx, '/v1/view/tree');
   assert(tree.ok, 'native tree is ok');
-  assert(findNodeByText(tree.root, 'AiApp Native Bridge Test'), 'native title is visible in SDK tree');
-  assert(findNodeByText(tree.root, 'Native Increment'), 'native increment button is visible in SDK tree');
+  assert(findNodeByText(tree.root, 'AiApp Native Bridge Test').node, 'native title is visible in SDK tree');
+  assert(findNodeByText(tree.root, 'Native Increment').node, 'native increment button is visible in SDK tree');
   summary.native.sdkTreeNodeCount = tree.nodeCount;
 
   const uiaXml = await uiaTree(ctx);
@@ -1333,7 +1656,7 @@ async function smoke(ctx, options) {
   await tapText(ctx, 'Native Increment');
   await sleep(700);
   const treeAfterTap = await bridgeGet(ctx, '/v1/view/tree');
-  assert(findNodeByText(treeAfterTap.root, 'Native counter: 1'), 'tap changed native counter');
+  assert(findNodeByText(treeAfterTap.root, 'Native counter: 1').node, 'tap changed native counter');
   summary.native.tapChangedCounter = true;
 
   await tapText(ctx, 'native_input');
@@ -1526,4 +1849,15 @@ function requiredNumber(value, name) {
   if (!Number.isFinite(number)) throw new Error(`${name} is required`);
   return number;
 }
+
+module.exports = {
+  buildBridgeFailureResult,
+  findTappableNodeByText,
+  firstErrorLine,
+  helpText,
+  nodeTapState,
+  normalizeBridgeError,
+  parseComponentFromWindowLine,
+  parseForegroundWindow,
+};
 

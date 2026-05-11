@@ -3,6 +3,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
+const packageInfo = require('../package.json');
 const bridgeDir = __dirname;
 const cliScript = path.join(bridgeDir, 'ai-app-bridge.js');
 const nodeBinary = process.env.AI_APP_BRIDGE_NODE || process.execPath;
@@ -77,7 +78,7 @@ async function handleMessage(body) {
         },
         serverInfo: {
           name: 'ai-app-bridge',
-          version: '0.1.7',
+          version: packageInfo.version,
         },
       });
       return;

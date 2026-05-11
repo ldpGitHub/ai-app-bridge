@@ -161,7 +161,7 @@ workaround when one exists.
 
 ## Screenshot capture does not prove the target package is foreground
 
-- Status: open
+- Status: fixed in desktop CLI `0.1.8`
 - Found while validating: `C:\project\reader`, home/login visual checks
 - Bridge version: desktop CLI `0.1.6`, app bridge `0.1.4`
 - Evidence:
@@ -175,16 +175,17 @@ workaround when one exists.
 - Impact: visual validation can falsely pass or fail if a human, launcher,
   permission surface, or another app takes foreground between `status/tree` and
   `screenshot`.
-- Current workaround: before screenshots, explicitly bring the app back with a
-  known component or real navigation path, then verify `/v1/status.activity`
-  and/or `/v1/view/tree` contains expected visible nodes.
-- Desired fix: when `packageName` is supplied, screenshot results should include
-  foreground package/activity metadata, and optionally fail or warn when the
-  foreground package does not match the requested target.
+- Fix: `screenshot --package-name ...` now includes foreground package/activity
+  metadata parsed from `dumpsys window` and returns
+  `error=foreground_package_mismatch` when the foreground package does not match
+  the requested package.
+- Verification: the native sample returned `foregroundMatchesPackage=true` while
+  foregrounded, then returned `ok=false` with `foreground_package_mismatch` after
+  pressing Home and capturing the launcher.
 
 ## `tap-text` can report success for a node outside the tappable viewport
 
-- Status: open
+- Status: fixed in desktop CLI `0.1.8`
 - Found while validating: `C:\project\reader`, bookshelf entry navigation
 - Bridge version: desktop CLI `0.1.6`, app bridge `0.1.4`
 - Evidence:
@@ -196,16 +197,17 @@ workaround when one exists.
   - The command did not navigate away from `com.ldp.reader.ui.activity.MainActivity`.
 - Impact: agent flows can believe a tap succeeded even though the target node is
   clipped/offscreen and Android ignores or misroutes the tap.
-- Current workaround: for navigation-critical assertions, verify the activity or
-  expected visible text after every `tap-text`; prefer UIAutomator-visible taps
-  or explicit coordinates after confirming bounds are inside the viewport.
-- Desired fix: `tap-text` should ignore bridge-tree nodes whose center is
-  outside the current viewport, or return a warning/failure when the selected
-  node is not tappable on screen.
+- Fix: `tap-text` now filters bridge-tree matches by effective visibility,
+  positive bounds, and center point inside the root/window viewport. It skips
+  offscreen bridge nodes and falls back to UIAutomator; if only offscreen bridge
+  matches exist, it returns `bridge_tree_node_not_tappable`.
+- Verification: Node unit tests cover visible selection after an offscreen
+  duplicate and the offscreen-only failure path. Native sample smoke still
+  passed tap, input, dialog, scroll, and back navigation.
 
 ## `status --package-name` can expose a raw socket hang-up before app readiness
 
-- Status: open
+- Status: fixed in desktop CLI `0.1.8`
 - Found while validating: `C:\project\reader`, post-install bridge readiness
 - Bridge version: desktop CLI `0.1.6`, app bridge `0.1.4`
 - Evidence:
@@ -219,8 +221,134 @@ workaround when one exists.
 - Impact: agent loops cannot reliably distinguish "target app is not started or
   bridge is not ready yet" from a real transport failure when the CLI exposes
   the low-level socket exception directly.
-- Current workaround: explicitly launch the target package/component first, then
-  retry `status` and follow with visible-text or activity assertions.
-- Desired fix: return a structured not-ready/connection-failed result that
-  includes the requested package name, attempted port/source, and a suggested
-  launch-or-retry action instead of surfacing the raw socket error.
+- Fix: `status` now catches socket reset, HTTP timeout, refused connections,
+  ADB timeout, and forward failures and returns structured JSON with the
+  requested package, attempted local/device ports, port discovery source, and a
+  suggested next action.
+- Verification: Node unit tests cover socket hang-up, status HTTP timeout, and
+  ADB timeout normalization.
+
+## Package port discovery can hang the CLI when ADB stalls
+
+- Status: fixed in desktop CLI `0.1.8`
+- Found while validating: multiple installed apps under `D:\TestProject`
+- Bridge version: desktop CLI `0.1.7`
+- Evidence:
+  - `adb shell run-as <package> cat files/ai_app_bridge_port.json` hung on some
+    installed apps while the package had a previously written port file.
+  - Because CLI ADB subprocesses had no timeout, `status --package-name` could
+    block indefinitely before reaching the HTTP bridge request.
+- Impact: batch unattended validation can stall on one unhealthy device/package
+  instead of returning a diagnosable result.
+- Fix: ADB subprocess calls now use a default timeout
+  (`AI_APP_BRIDGE_ADB_TIMEOUT_MS`, default 15000 ms, or `--adb-timeout-ms`) and
+  classify timeouts as `adb_timeout` for `status`.
+
+## Multiple package probes can fight over local port 18080
+
+- Status: fixed in desktop CLI `0.1.8`
+- Found while validating: multiple installed apps under `D:\TestProject`
+- Bridge version: desktop CLI `0.1.7`
+- Evidence:
+  - Separate status/tree probes for different packages reused local
+    `tcp:18080`, so later `adb forward` calls could remap the same local port
+    to another device bridge port.
+  - This produced false `HTTP timeout` results even when app-specific port files
+    existed.
+- Impact: parallel or rapid sequential validation across several bridged apps
+  can report false negatives.
+- Fix: when a package port file is discovered and `--port` was not explicitly
+  supplied, the CLI now forwards local `tcp:<devicePort>` to the same device
+  port instead of always using local 18080.
+
+## Very large Gradle builds need watchdog and heartbeat handling
+
+- Status: open
+- Found while validating: `D:\TestProject\DuckDuckGo-Android`
+- Evidence:
+  - After repairing the required NDK and fixing the dependency configuration,
+    `:app:assembleInternalDebug -PuseProprietaryFont=false --no-daemon` reached
+    real multi-module resource, manifest, Kotlin, KSP, and Anvil work.
+  - The build then produced no new Gradle output for more than an hour and no
+    APK was created under `app\build\outputs`.
+  - A JVM thread dump showed the Gradle daemon worker waiting for included build
+    task completion while process CPU still advanced slowly.
+- Impact: unattended production validation can burn hours on one large app
+  without a clear "failed" result unless the harness has task-level heartbeats,
+  log-stall detection, and a timeout policy.
+- Workaround: for production-scale apps, run builds under an external watchdog
+  that records the last output timestamp, current task evidence, JVM thread
+  state, and artifact presence before terminating a stale run.
+
+## `--help` should not probe ADB or the default sample package
+
+- Status: fixed in desktop CLI `0.1.10`
+- Found while validating: `D:\TestProject\DuckDuckGo-Android`
+- Evidence:
+  - Running `node ...\ai-app-bridge.js --help` did not print help. Because the
+    parser treated `--help` as an option and no command was present, it fell
+    through to default `status`.
+  - The command then attempted to query the default sample package
+    `io.github.lidongping.aiappbridge.sample` and waited for bridge readiness.
+- Impact: unattended scripts and humans can trigger device I/O while only trying
+  to inspect CLI usage, which is confusing during multi-app validation.
+- Fix: `--help` and `help` now print static usage text and return without
+  constructing an ADB context or touching the device. Unit tests execute both
+  forms with a deliberately invalid `ADB` value to prove no ADB subprocess is
+  used.
+
+## Windows KSP incremental processing can fail across drive roots
+
+- Status: open environment/toolchain issue
+- Found while validating: `D:\TestProject\DuckDuckGo-Android`
+- Evidence:
+  - `:app:kspInternalDebugKotlin` failed in Glide KSP with
+    `this and base files have different roots`.
+  - The processor attempted to associate
+    `C:\Users\ldp\.gradle\caches\...\okhttp3-integration-4.16.0-api.jar!...`
+    with base project path `D:\TestProject\DuckDuckGo-Android\app`.
+  - A narrower retry with quoted PowerShell argument `"-Pksp.incremental=false"`
+    and `--no-build-cache` passed `:app:kspInternalDebugKotlin` in 4m12s.
+- Impact: a production app can fail after dependency resolution and manifest
+  merge even though the bridge runtime is not involved.
+- Workaround: for Windows cross-drive builds, retry with
+  `"-Pksp.incremental=false" --no-build-cache`; quote the `-P` argument in
+  PowerShell so Gradle does not parse `.incremental=false` as a task name.
+
+## Production Android clones may be missing native submodules
+
+- Status: open repository setup issue
+- Found while validating: `D:\TestProject\DuckDuckGo-Android`
+- Evidence:
+  - After KSP was fixed, `:httpsupgrade-impl:configureCMakeDebug[arm64-v8a]`
+    failed because CMake could not find
+    `src/main/cpp/bloom_cpp/src/BloomFilter.cpp`.
+  - `git submodule status` showed leading `-` entries for
+    `httpsupgrade/httpsupgrade-impl/src/main/cpp/bloom_cpp` and
+    `submodules/privacy-grade`.
+  - `git submodule update --init --recursive` checked out both modules and the
+    nested `bloom_cpp/third-party/catch2`, after which the native CMake step and
+    full APK build passed.
+- Impact: unattended validation can misclassify a missing repository bootstrap
+  step as a native toolchain or bridge integration failure.
+- Workaround: before building large production Android repos, record
+  `git submodule status` and run `git submodule update --init --recursive` when
+  any required submodule is uninitialized.
+
+## SDK manager can leave partial Android package downloads
+
+- Status: open environment issue
+- Found while validating: `D:\TestProject\DuckDuckGo-Android`
+- Evidence:
+  - Gradle attempted to auto-install `ndk;21.4.7075529` and failed with
+    `ZipException: Archive is not a ZIP archive`.
+  - The SDK temp area contained a partial
+    `android-ndk-r21e-windows-x86_64.zip` of `545710784` bytes.
+  - Resuming the official download to `1109665123` bytes and verifying SHA-1
+    `FC44FEA8BB3F5A6789821F40F41DCE2D2CD5DC30` allowed the NDK to be installed
+    with `Pkg.Revision = 21.4.7075529`.
+- Impact: failures can look like app/Gradle failures while the actual problem
+  is a corrupted SDK component download.
+- Workaround: verify SDK component file size/hash before retrying the build; if
+  the package is partial, remove only the exact failed component directory and
+  install a verified archive.

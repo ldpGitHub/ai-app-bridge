@@ -1,6 +1,183 @@
 # Progress
 
+## 2026-05-11
+
+- Desktop CLI `0.1.8` was published to npm after local package validation.
+  `npm view @lidongping/ai-app-bridge version` returned `0.1.8` after publish.
+  The temporary npm token was removed from the working tree after use; because
+  it appeared in chat, it should still be rotated.
+- Re-ran broad device validation across installed apps under `D:\TestProject`
+  after ADB recovered to device `b46093e6`:
+  - `android-architecture-samples`: explicit launch succeeded; bridge `0.1.5`
+    on port `18083`; `/v1/status`, `/v1/view/tree`, and foreground screenshot
+    verification passed.
+  - `compose-samples\Jetchat`: explicit launch succeeded; bridge `0.1.4` on
+    port `18081`; `/v1/status`, `/v1/view/tree`, and foreground screenshot
+    verification passed.
+  - `NewPipe`: retry after initial app readiness failure succeeded with bridge
+    `0.1.5` on port `18084` and a large UI tree. Screenshot correctly failed
+    with `foreground_package_mismatch` while Android permission UI was in front,
+    proving the desktop CLI guard catches permission surfaces.
+  - `AntennaPod`: bridge `0.1.5` on port `18085`; status/tree/screenshot passed.
+  - `Now in Android`: bridge `0.1.5` on port `18087`;
+    status/tree/screenshot passed.
+  - `flutter_inappwebview` Android example: bridge `0.1.5` on port `18086`;
+    status/tree/screenshot passed.
+  - `flutter-samples\platform_design`: bridge `0.1.5` on port `18082`;
+    status/tree/screenshot passed.
+- External project build validation from the same pass:
+  - `android-architecture-samples` `:app:assembleDebug` passed.
+  - `compose-samples\Jetchat` `:app:assembleDebug` passed.
+  - `AntennaPod` `:app:assembleDebug` passed.
+  - `NewPipe` `:app:assembleDebug` passed and executed
+    `:app:transformDebugClassesWithAsm`.
+  - `flutter-samples\platform_design` `flutter build apk --debug --no-pub`
+    passed after Kotlin incremental compilation reported a cross-drive cache
+    path warning and fell back.
+  - `openfoodfacts/smooth-app` stayed toolchain-blocked before bridge runtime:
+    local Dart was `3.9.2`, while the app requires Dart `^3.11.5`.
+- `Now in Android` deep validation was expanded with real code changes:
+  `ForYouViewModel` exposes a `BookmarkValidationUiState`, bookmark operations
+  enter validating/saved/removed/invalid/failed states, `ForYouScreen` renders
+  the status surface, and `ForYouViewModelTest` covers the state transitions.
+  The worker-ran targeted unit test
+  `:feature:foryou:impl:testDemoDebugUnitTest --tests ...ForYouViewModelTest`
+  and `assembleDemoDebug` both passed. The APK was installed on device,
+  `/v1/status` and screenshot foreground verification passed, UIAutomator saw
+  the bookmark control toggle between `Bookmark` and `Unbookmark`, and logcat
+  contained `AiLoop  : For You bookmark changed id=2 bookmarked=false`.
+- `flutter_inappwebview` Android example deep validation was expanded with a
+  local H5 bridge page in `lib/main.dart`. The app now loads
+  `https://debug.local/ai-bridge-probe/`, exposes an `AI Bridge Closure Probe`
+  Flutter surface, injects Flutter state into the H5 page, and receives H5
+  button events through `window.flutter_inappwebview.callHandler`. `flutter
+  analyze --no-pub` and `flutter build apk --debug --no-pub` passed. Runtime
+  `/v1/status` reported H5 DOM title `AI Bridge H5 Probe`, controls
+  `h5-input` and `h5-event-button`, Flutter operable nodes such as
+  `AI Bridge Probe Banner`, and capture counts `logs=1`, `state=2`, `events=2`.
+- `DuckDuckGo-Android` was used as a 100+ module production-scale validation
+  target. A debug-only runtime dependency was added with
+  `debugImplementation "com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:_"`,
+  and `versions.properties` maps it to `0.1.5`. The first build exposed an
+  environment blocker: automatic `ndk;21.4.7075529` install left a partial ZIP
+  and failed with `ZipException: Archive is not a ZIP archive`. The NDK was
+  repaired by downloading the official `android-ndk-r21e-windows-x86_64.zip`,
+  verifying SHA-1 `FC44FEA8BB3F5A6789821F40F41DCE2D2CD5DC30`, and installing it
+  under `Sdk\ndk\21.4.7075529`.
+- DuckDuckGo then reached real multi-module resource, manifest, Kotlin, KSP,
+  and Anvil build work. `internalDebugImplementation` was not supported by this
+  Groovy/AGP setup, so the dependency was narrowed to standard
+  `debugImplementation` to keep release variants bridge-free. After that, the
+  build ran for more than an hour with no APK output; thread dump showed the
+  Gradle daemon worker waiting for included build task completion while CPU was
+  still advancing slowly. The run was terminated and recorded as an unattended
+  watchdog/heartbeat requirement for very large Gradle builds, not as a bridge
+  dependency resolution failure.
+- DuckDuckGo validation was resumed with narrower evidence first:
+  `:app:dependencyInsight --configuration internalDebugRuntimeClasspath
+  --dependency ai-app-bridge-android` resolved
+  `com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.5` for
+  `internalDebugRuntimeClasspath`, and
+  `:app:assembleInternalDebug --dry-run` completed successfully.
+- The resumed full build exposed two production-repo environment/toolchain
+  issues before APK output:
+  - `:app:kspInternalDebugKotlin` failed in Glide KSP with
+    `this and base files have different roots` between
+    `C:\Users\ldp\.gradle\...okhttp3-integration-4.16.0-api.jar` and
+    `D:\TestProject\DuckDuckGo-Android\app`. Quoting
+    `"-Pksp.incremental=false"` in PowerShell and disabling build cache let the
+    narrow KSP task pass in 4m12s.
+  - `:httpsupgrade-impl:configureCMakeDebug[arm64-v8a]` failed because
+    `bloom_cpp/src/BloomFilter.cpp` was missing. `git submodule update --init
+    --recursive` checked out `bloom_cpp`, `privacy-grade`, and
+    `bloom_cpp/third-party/catch2`.
+- With those fixes, DuckDuckGo `:app:assembleInternalDebug
+  -PuseProprietaryFont=false "-Pksp.incremental=false"
+  --no-configuration-cache --no-build-cache --no-daemon --max-workers=2`
+  completed successfully in 7m09s and produced
+  `app\build\outputs\apk\internal\debug\duckduckgo-5.278.1-internal-debug.apk`
+  (`121423989` bytes).
+- Runtime validation on device `b46093e6` passed:
+  - ColorOS install required tapping the device-side `继续安装` confirmation;
+    `adb install --no-streaming -r -d ...duckduckgo-5.278.1-internal-debug.apk`
+    then returned `Success`.
+  - `run-as com.duckduckgo.mobile.android.debug cat
+    files/ai_app_bridge_port.json` returned bridge port `18089`, version
+    `0.1.5`.
+  - `status --package-name com.duckduckgo.mobile.android.debug` returned
+    `ok=true`, app version `5.278.1`, debuggable `true`, current activity
+    `com.duckduckgo.app.onboarding.ui.OnboardingActivity`, and bridge
+    `127.0.0.1:18089`.
+  - `tree --package-name com.duckduckgo.mobile.android.debug` returned
+    `ok=true`, `windowCount=1`, `nodeCount=294`, and visible onboarding nodes
+    including `Let's do it!`.
+  - `screenshot --package-name ...` wrote
+    `D:\TestProject\DuckDuckGo-Android\build\ai-bridge-duckduckgo.png`
+    (`1264x2780`) with `foregroundMatchesPackage=true`.
+  - `tap-text --target-text "Let's do it!"` selected the bridge-tree node and
+    tapped `(632,1169)`, after which UIAutomator showed onboarding step `1 / 3`
+    with `Protections activated!` and `Choose Your Browser`.
+- Desktop CLI `0.1.10` was published to npm after adding a zero-side-effect
+  `--help`/`help` path. The DuckDuckGo run showed that `--help` previously fell
+  through to default `status` and probed the sample app. Unit tests now execute
+  both help forms with an invalid `ADB` value to prove no device command is run.
+  The MCP server now reports its version from `package.json` instead of a stale
+  hard-coded value. `npm view @lidongping/ai-app-bridge version` returned
+  `0.1.10` after publish.
+
 ## 2026-05-10
+
+- Desktop CLI `0.1.8` fixes were implemented for reader and unattended
+  validation failures:
+  - `status --package-name` now returns structured JSON for socket hang-up,
+    HTTP timeout, ADB timeout, refused connections, and forward failures instead
+    of exposing raw Node errors.
+  - ADB subprocess calls now have a default timeout, configurable with
+    `AI_APP_BRIDGE_ADB_TIMEOUT_MS` or `--adb-timeout-ms`.
+  - Package port discovery no longer forces all package probes through local
+    `18080`; discovered device ports are forwarded to matching local ports when
+    `--port` is not explicitly supplied.
+  - `screenshot --package-name` now includes foreground package/activity
+    metadata and fails with `foreground_package_mismatch` when the current
+    foreground package is not the requested target.
+  - `tap-text` now rejects invisible, empty, or offscreen bridge-tree matches
+    before tapping, and falls back to UIAutomator.
+- Desktop CLI tests were added with Node's built-in test runner. Current
+  coverage includes socket hang-up normalization, HTTP timeout normalization,
+  ADB timeout normalization, foreground window parsing, offscreen duplicate
+  `tap-text` selection, and offscreen-only `tap-text` failure.
+- Local repository verification for this slice passed:
+  - `npm run check` in `desktop/ai-app-bridge-cli`.
+  - `:ai-app-bridge-android:build :ai-app-bridge-gradle-plugin:build`.
+  - `flutter pub get` and `flutter analyze --no-pub` in
+    `flutter/ai_app_bridge_flutter`.
+  - `npm pack --dry-run` for the desktop CLI package.
+- Native sample verification passed on device `b46093e6` before ADB later went
+  offline during external-app validation:
+  - Built `examples/android-native-sample` with
+    `:app:assembleDebug`; `transformDebugClassesWithAsm` executed.
+  - Installed through the ColorOS security installer flow.
+  - `smoke --skip-flutter-launch` passed status, SDK tree, UIAutomator tree,
+    screenshot, H5 DOM/click/input/wait/scroll, tap, input, dialog, capture
+    query, permission state, scroll, and back navigation.
+  - Foreground screenshot verification returned `foregroundMatchesPackage=true`
+    while the sample was foreground, then returned
+    `foreground_package_mismatch` after pressing Home.
+- External app validation under `D:\TestProject`:
+  - NewPipe was fully validated before the device went offline:
+    `status --packageName org.schabi.newpipe.debug --port 18084` returned
+    bridge `0.1.5`, app `0.28.6`, current `org.schabi.newpipe.MainActivity`,
+    and `capture.network=13`; `/v1/view/tree` returned `nodeCount=364` and
+    `windowCount=1`; foreground was
+    `org.schabi.newpipe.debug/org.schabi.newpipe.MainActivity`; screenshot
+    returned a `1264x2780` PNG.
+  - AntennaPod and Now in Android were installed and had bridge port files
+    (`18085` and `18087`), but runtime CLI validation was blocked after an ADB
+    transport failure. The device stayed `offline` after server restart, so
+    deeper validation was stopped instead of forcing more commands.
+  - Flutter validation inventory confirmed installed packages for
+    `flutter_inappwebview` and `platform_design`; `smooth-app` remains blocked
+    by local Dart `3.9.2` versus its required `^3.11.5`.
 
 - Compatibility validation expanded to external projects under `D:\TestProject`:
   `compose-samples\Jetchat`, `android-architecture-samples`, and
