@@ -13,11 +13,13 @@ const {
   normalizeBridgeError,
   parseWebViewDevToolsSockets,
   parseKeyboardState,
+  parseUiaViewport,
   parseComponentFromWindowLine,
   parseForegroundWindow,
   chooseWebViewDevToolsSocket,
   chooseWebViewPage,
   shouldDismissKeyboardForPoint,
+  waitTextConditionsMet,
 } = require('../bin/ai-app-bridge.js');
 
 const cliPath = path.join(__dirname, '..', 'bin', 'ai-app-bridge.js');
@@ -178,6 +180,39 @@ test('keyboard guard only dismisses for lower-screen targets while IME is visibl
     viewport,
     keyboardVisible: false,
   }).dismiss, false);
+});
+
+test('parses UIAutomator root viewport for keyboard-aware fallback taps', () => {
+  const viewport = parseUiaViewport(
+    '<hierarchy><node index="0" bounds="[0,0][1264,2780]"><node bounds="[10,20][30,40]" /></node></hierarchy>',
+  );
+
+  assert.deepEqual(viewport, {
+    left: 0,
+    top: 0,
+    right: 1264,
+    bottom: 2780,
+    width: 1264,
+    height: 2780,
+  });
+});
+
+test('wait-text conditions require page context, activity, and absent text', () => {
+  const snapshot = {
+    text: 'New Task\nBridge Todo\nSave task',
+    activity: 'com.example.todo.TodoActivity',
+  };
+
+  assert.equal(waitTextConditionsMet(snapshot, 'Bridge Todo').ok, true);
+  assert.equal(waitTextConditionsMet(snapshot, 'Bridge Todo', {
+    requireTexts: ['All Tasks'],
+  }).reason, 'required_text_missing');
+  assert.equal(waitTextConditionsMet(snapshot, 'Bridge Todo', {
+    absentTexts: ['New Task'],
+  }).reason, 'absent_text_present');
+  assert.equal(waitTextConditionsMet(snapshot, 'Bridge Todo', {
+    requireActivity: 'OtherActivity',
+  }).reason, 'activity_mismatch');
 });
 
 test('installer assistant recognises ROM installer surfaces and safe positive labels', () => {

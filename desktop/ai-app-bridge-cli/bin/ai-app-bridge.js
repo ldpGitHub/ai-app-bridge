@@ -45,6 +45,9 @@ Options:
   --out-file <path>      Screenshot output path.
   --apk-path <path>      APK path used by install-apk.
   --target-text <text>   Text used by tap-text or wait-text.
+  --require-text <text>  Extra text that must be present for wait-text.
+  --absent-text <text>   Text that must be absent for wait-text.
+  --require-activity <s> Activity substring that must match for wait-text.
   --hide-keyboard        Hide the soft keyboard after input-text.
   --allow-downgrade      Pass -d to adb install.
   --install-timeout-ms <ms>  Timeout for the adb install subprocess.
@@ -169,7 +172,7 @@ async function runCommand(command, options, ctx) {
     case 'tap-text':
       return tapText(ctx, requiredString(options.targetText, 'targetText'), options);
     case 'wait-text':
-      return waitText(ctx, requiredString(options.targetText, 'targetText'), Number(options.timeoutSec || 10));
+      return waitText(ctx, requiredString(options.targetText, 'targetText'), options);
     case 'input-text':
       return inputText(ctx, requiredString(options.text, 'text'), options);
     case 'keyboard-state':
@@ -1559,7 +1562,8 @@ async function tapText(ctx, targetText, options = {}) {
     };
   }
 
-  const uiaNode = findUiaNodeByText(await uiaTree(ctx), targetText);
+  let xml = await uiaTree(ctx);
+  let uiaNode = findUiaNodeByText(xml, targetText);
   if (!uiaNode) {
     if (bridgeMatch.rejected) {
       return {
@@ -1574,10 +1578,34 @@ async function tapText(ctx, targetText, options = {}) {
     }
     throw new Error(`text not found in Android bridge tree or UIAutomator tree: ${targetText}`);
   }
-  const x = Math.round((uiaNode.left + uiaNode.right) / 2);
-  const y = Math.round((uiaNode.top + uiaNode.bottom) / 2);
+  let x = Math.round((uiaNode.left + uiaNode.right) / 2);
+  let y = Math.round((uiaNode.top + uiaNode.bottom) / 2);
+  let keyboard = null;
+  if (!booleanOption(options.noAutoHideKeyboard)) {
+    keyboard = await maybeHideKeyboardForPoint(ctx, { x, y }, parseUiaViewport(xml));
+    if (keyboard.decision?.dismiss && !keyboard.dismissed) {
+      return {
+        ok: false,
+        error: 'keyboard_obscures_target',
+        targetText,
+        source: 'uiautomator',
+        x,
+        y,
+        keyboard,
+      };
+    }
+    if (keyboard.dismissed) {
+      xml = await uiaTree(ctx);
+      const refreshedNode = findUiaNodeByText(xml, targetText);
+      if (refreshedNode) {
+        uiaNode = refreshedNode;
+        x = Math.round((uiaNode.left + uiaNode.right) / 2);
+        y = Math.round((uiaNode.top + uiaNode.bottom) / 2);
+      }
+    }
+  }
   await tap(ctx, x, y);
-  return { ok: true, transport: 'adb', targetText, source: 'uiautomator', x, y };
+  return { ok: true, transport: 'adb', targetText, source: 'uiautomator', x, y, keyboard };
 }
 
 function findTappableNodeByText(tree, targetText) {
@@ -1685,6 +1713,23 @@ function findUiaNodeByText(xml, targetText) {
     };
   }
   return null;
+}
+
+function parseUiaViewport(xml) {
+  const match = /<node\b[^>]*\bbounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(String(xml || ''));
+  if (!match) return null;
+  const left = Number(match[1]);
+  const top = Number(match[2]);
+  const right = Number(match[3]);
+  const bottom = Number(match[4]);
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+  };
 }
 
 async function tapUiaText(ctx, targetText, options = {}) {
@@ -1830,15 +1875,24 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-async function waitText(ctx, targetText, timeoutSec) {
+async function waitText(ctx, targetText, options = {}) {
+  const timeoutSec = Number(options.timeoutSec || 10);
+  const conditions = {
+    requireTexts: splitCsv(options.requireText || options.requireTexts),
+    absentTexts: splitCsv(options.absentText || options.absentTexts),
+    requireActivity: options.requireActivity || options.activity || '',
+  };
   const deadline = Date.now() + timeoutSec * 1000;
+  let lastCheck = null;
   while (Date.now() < deadline) {
-    if (await textPresent(ctx, targetText)) {
-      return { ok: true, targetText, timeoutSec };
+    const snapshot = await textSnapshot(ctx);
+    lastCheck = waitTextConditionsMet(snapshot, targetText, conditions);
+    if (lastCheck.ok) {
+      return { ok: true, targetText, timeoutSec, conditions, matched: lastCheck };
     }
     await sleep(500);
   }
-  return { ok: false, error: 'text_not_found', targetText, timeoutSec };
+  return { ok: false, error: 'text_not_found', targetText, timeoutSec, conditions, lastCheck };
 }
 
 async function flutterNodes(ctx) {
@@ -2287,17 +2341,69 @@ function h5OperationScript(action, params) {
 }
 
 async function textPresent(ctx, targetText) {
+  return waitTextConditionsMet(await textSnapshot(ctx), targetText).ok;
+}
+
+async function textSnapshot(ctx) {
+  const parts = [];
+  let activity = '';
   for (const loader of [
-    async () => JSON.stringify(await bridgeGet(ctx, '/v1/status')),
+    async () => {
+      const status = await bridgeGet(ctx, '/v1/status');
+      activity = String(status?.activity?.current || '');
+      return JSON.stringify(status);
+    },
     async () => JSON.stringify(await bridgeGet(ctx, '/v1/view/tree')),
     async () => await uiaTree(ctx),
   ]) {
     try {
       const text = await loader();
-      if (text.includes(targetText)) return true;
+      parts.push(text);
     } catch (_) {}
   }
-  return false;
+  return {
+    text: parts.join('\n'),
+    activity,
+  };
+}
+
+function waitTextConditionsMet(snapshot, targetText, options = {}) {
+  const text = String(snapshot?.text || '');
+  const activity = String(snapshot?.activity || '');
+  if (!text.includes(targetText)) {
+    return { ok: false, reason: 'target_text_missing', targetText, activity };
+  }
+  const requireActivity = String(options.requireActivity || '');
+  if (requireActivity && !activity.includes(requireActivity)) {
+    return {
+      ok: false,
+      reason: 'activity_mismatch',
+      targetText,
+      activity,
+      requireActivity,
+    };
+  }
+  const missingTexts = (options.requireTexts || []).filter((value) => !text.includes(value));
+  if (missingTexts.length) {
+    return {
+      ok: false,
+      reason: 'required_text_missing',
+      targetText,
+      activity,
+      missingTexts,
+    };
+  }
+  const presentAbsentTexts = (options.absentTexts || []).filter((value) => text.includes(value));
+  if (presentAbsentTexts.length) {
+    return {
+      ok: false,
+      reason: 'absent_text_present',
+      targetText,
+      activity,
+      presentAbsentTexts,
+    };
+  }
+  return { ok: true, targetText, activity };
 }
 
 async function keyboardState(ctx) {
@@ -2953,10 +3059,12 @@ module.exports = {
   normalizeBridgeError,
   parseWebViewDevToolsSockets,
   parseKeyboardState,
+  parseUiaViewport,
   parseComponentFromWindowLine,
   parseForegroundWindow,
   chooseWebViewDevToolsSocket,
   chooseWebViewPage,
   shouldDismissKeyboardForPoint,
+  waitTextConditionsMet,
 };
 
