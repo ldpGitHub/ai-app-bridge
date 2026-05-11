@@ -181,6 +181,33 @@ workaround when one exists.
   can miss the obstruction; screenshots/UIAutomator hierarchy should be used
   as the next fallback signal for those devices.
 
+## Concurrent UIAutomator dumps can collide on the device
+
+- Status: fixed in desktop CLI `0.1.17`
+- Found while validating: `D:\TestProject\nowinandroid` on OnePlus PKR110 /
+  Android SDK 36.
+- Evidence:
+  - Running `wait-text` and multiple `uia-tree` commands in parallel caused
+    device logcat to report
+    `UiAutomationService ... already registered!`.
+  - The target app stayed alive; the failure came from Android's shell
+    `uiautomator dump` process trying to register more than one UiAutomation
+    service at the same time.
+- Impact: MCP or CLI users can naturally issue parallel observation requests,
+  and the bridge may convert a harmless concurrent read into noisy platform
+  crashes or transient UI-tree failures.
+- Fix: desktop CLI now wraps every `uiautomator dump` call in a host-side,
+  per-device cross-process file lock. Parallel commands queue on the host
+  before touching the device, then execute the dump/read sequence one at a
+  time.
+- Verification:
+  - `npm run check` passed with 23 tests, including a lock serialization
+    regression.
+  - Re-running three parallel UIAutomator-backed commands against Now in
+    Android completed successfully.
+  - `adb logcat -d -s AndroidRuntime` after the fixed run contained no
+    `UiAutomationService`, `already registered`, or `FATAL EXCEPTION` entries.
+
 ## OkHttp auto capture can be skipped when app package shares the bridge prefix
 
 - Status: fixed in Android Gradle plugin `0.1.6`

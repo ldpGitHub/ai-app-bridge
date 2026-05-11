@@ -1,5 +1,7 @@
 const assert = require('assert/strict');
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const test = require('node:test');
 
@@ -25,7 +27,9 @@ const {
   compactNetworkRecord,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
+  uiautomatorLockPath,
   waitTextConditionsMet,
+  withFileLock,
 } = require('../bin/ai-app-bridge.js');
 
 const cliPath = path.join(__dirname, '..', 'bin', 'ai-app-bridge.js');
@@ -274,6 +278,41 @@ test('compacts UIAutomator tree by resource id and visible viewport', () => {
   assert.equal(compact.nodes.length, 1);
   assert.equal(compact.nodes[0].text, 'OpenAI');
   assert.equal(compact.nodes[0].resourceId, 'app:id/title');
+});
+
+test('uiautomator lock path is stable and filesystem-safe', () => {
+  const lockPath = uiautomatorLockPath({
+    serial: 'device:5555',
+    adb: 'C:\\Android SDK\\platform-tools\\adb.exe',
+  });
+
+  assert.equal(path.dirname(lockPath), os.tmpdir());
+  assert.match(path.basename(lockPath), /^ai-app-bridge-uiautomator-/);
+  assert.doesNotMatch(path.basename(lockPath), /[:\\/\s]/);
+});
+
+test('file lock serializes concurrent uiautomator-style work', async () => {
+  const lockPath = path.join(os.tmpdir(), `ai-app-bridge-test-${process.pid}-${Date.now()}.lock`);
+  let active = 0;
+  let maxActive = 0;
+  const runLocked = () => withFileLock(lockPath, async () => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    active -= 1;
+  }, {
+    pollMs: 5,
+    timeoutMs: 1000,
+    staleMs: 5000,
+  });
+
+  try {
+    await Promise.all([runLocked(), runLocked(), runLocked()]);
+    assert.equal(maxActive, 1);
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    fs.rmSync(lockPath, { force: true });
+  }
 });
 
 test('network output can be filtered and compacted without bodies', () => {

@@ -4,6 +4,7 @@ const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 
 const defaults = {
@@ -1588,10 +1589,13 @@ function truncateString(value, maxBytes) {
 
 async function uiaTree(ctx) {
   const remotePath = '/sdcard/ai_app_window.xml';
-  return retry(async () => {
+  return withFileLock(uiautomatorLockPath(ctx), async () => retry(async () => {
     await adb(ctx, ['shell', 'uiautomator', 'dump', remotePath]);
     return (await adb(ctx, ['exec-out', 'cat', remotePath])).stdout;
-  }, 4, 500);
+  }, 4, 500), {
+    timeoutMs: Number(process.env.AI_APP_BRIDGE_UIA_LOCK_TIMEOUT_MS || 30000),
+    staleMs: Number(process.env.AI_APP_BRIDGE_UIA_LOCK_STALE_MS || 120000),
+  });
 }
 
 async function bridgeTree(ctx, options = {}) {
@@ -3530,6 +3534,86 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function uiautomatorLockPath(ctx = {}) {
+  const key = sanitizeLockKey([
+    ctx.serial || 'default',
+    ctx.adb || defaults.adb,
+  ].join('-'));
+  return path.join(os.tmpdir(), `ai-app-bridge-uiautomator-${key}.lock`);
+}
+
+function sanitizeLockKey(value) {
+  return String(value || 'default').replace(/[^a-zA-Z0-9_.-]+/g, '_').slice(0, 120) || 'default';
+}
+
+async function withFileLock(lockPath, action, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 30000);
+  const staleMs = Number(options.staleMs || 120000);
+  const pollMs = Number(options.pollMs || 100);
+  const startMs = Date.now();
+  let handle = null;
+
+  while (handle === null) {
+    try {
+      handle = fs.openSync(lockPath, 'wx');
+      try {
+        fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, createdAtMs: Date.now() }));
+      } catch (writeError) {
+        try {
+          fs.closeSync(handle);
+        } catch (_) {
+          // Ignore close failure while unwinding the lock creation failure.
+        }
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (_) {
+          // Ignore cleanup failure while preserving the original write error.
+        }
+        handle = null;
+        throw writeError;
+      }
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        removeStaleLock(lockPath, staleMs);
+        if (Date.now() - startMs >= timeoutMs) {
+          const timeout = new Error(`timed out waiting for lock: ${lockPath}`);
+          timeout.code = 'LOCK_TIMEOUT';
+          throw timeout;
+        }
+        await sleep(pollMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  try {
+    return await action();
+  } finally {
+    try {
+      fs.closeSync(handle);
+    } catch (_) {
+      // Ignore close failures; unlink below is the operation that releases the lock for peers.
+    }
+    try {
+      fs.unlinkSync(lockPath);
+    } catch (_) {
+      // A stale-lock cleanup racing with process shutdown should not mask the original result.
+    }
+  }
+}
+
+function removeStaleLock(lockPath, staleMs) {
+  try {
+    const stat = fs.statSync(lockPath);
+    if (Date.now() - stat.mtimeMs > staleMs) {
+      fs.unlinkSync(lockPath);
+    }
+  } catch (_) {
+    // Another process may have released the lock between the exists check and stat/unlink.
+  }
+}
+
 function requiredString(value, name) {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${name} is required`);
   return value;
@@ -3565,6 +3649,8 @@ module.exports = {
   compactNetworkRecord,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
+  uiautomatorLockPath,
   waitTextConditionsMet,
+  withFileLock,
 };
 

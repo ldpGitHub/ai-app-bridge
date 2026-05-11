@@ -2,6 +2,22 @@
 
 ## 2026-05-12
 
+- Desktop CLI `0.1.17` adds a host-side cross-process lock around
+  `uiautomator dump`. A Now in Android validation pass reproduced the device
+  failure mode by running `wait-text` and multiple `uia-tree` commands in
+  parallel; logcat showed `UiAutomationService ... already registered!`. After
+  the lock fix, three parallel UIAutomator-backed commands all completed and
+  `adb logcat -d -s AndroidRuntime` showed no `UiAutomationService`,
+  `already registered`, or `FATAL EXCEPTION` entries.
+- The same pass upgraded `D:\TestProject\nowinandroid` from bridge `0.1.5` to
+  `0.1.8`, rebuilt `:app:assembleDemoDebug`, installed
+  `app-demo-debug.apk` with `install-apk`, and verified `/v1/status` reported
+  runtime `0.1.8` on `com.google.samples.apps.nowinandroid.demo.debug`.
+  UIAutomator operated the Compose `Bookmark` control, logcat recorded
+  `AiLoop  : For You bookmark changed id=2 bookmarked=true`, and the known
+  Compose limitation remained: bridge `tree` sees `AndroidComposeView` while
+  `uia-tree` exposes the actionable Compose semantics.
+
 - Added WebView DevTools/CDP capture for debuggable Android WebViews:
   - Android runtime `0.1.7` enables WebView debugging only when the host app is
     debuggable.
