@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Uses Android runtime 0.1.7 for debug builds.
+- Enables debug-only WebView DevTools/CDP observability through the Android runtime.
+
 ## 0.1.6
 
 - Uses Android runtime 0.1.6 for debug builds.

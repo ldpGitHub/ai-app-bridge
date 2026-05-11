@@ -18,6 +18,8 @@ node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js smoke --package-name io.gith
 ```
 
 The smoke covers status, Android tree, UIAutomator tree, screenshot, native tap, native WebView DOM operations, logs, network, state, events, permission state, Flutter snapshot availability when a Flutter host is present, and OkHttp auto capture when the plugin is enabled.
+It also attaches to the sample WebView through DevTools/CDP and verifies H5
+network and console capture.
 
 ## External App Validation
 
@@ -29,6 +31,8 @@ node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js tree --package-name <package
 node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js screenshot --package-name <package> --out-file <file>
 node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js keyboard-state --package-name <package>
 node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js install-apk --package-name <package> --apk-path <apk>
+node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js webview-pages --package-name <package>
+node desktop/ai-app-bridge-cli/bin/ai-app-bridge.js webview-network --package-name <package> --duration-ms 3000
 ```
 
 Large Gradle apps should run under an external watchdog that records the last

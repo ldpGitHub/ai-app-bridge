@@ -205,7 +205,9 @@ workaround when one exists.
 
 ## WebView H5 traffic is not captured by native OkHttp instrumentation
 
-- Status: open
+- Status: fixed in desktop CLI `0.1.12` and Android runtime `0.1.7` for
+  debuggable Android WebViews with WebView debugging enabled. JSBridge callback
+  payload correlation is still a separate future capability.
 - Found while diagnosing: a hybrid Android app where a native login opens an H5
   inventory page through WebView.
 - Evidence:
@@ -221,15 +223,21 @@ workaround when one exists.
   blind to the H5 page's own auth requests and JSBridge token/header exchange.
   This can hide first-entry WebView bugs behind a misleading "native side looks
   fine" result.
-- Desired behavior: the desktop loop should attach to the target app's WebView
-  DevTools socket when WebView debugging is enabled, collect console output,
-  page URL/title, and Network.request/response events, and correlate them with
-  bridge actions. It should also expose optional JSBridge tracing so calls such
-  as token/header getters can be matched to their callback payloads.
-- Current workaround: use `adb shell cat /proc/net/unix` to locate
-  `webview_devtools_remote_*`, forward it with `adb forward`, then inspect the
-  page through Chrome DevTools Protocol or add temporary app-side logs around
-  the JSBridge handlers.
+- Fix: the Android runtime enables `WebView.setWebContentsDebuggingEnabled(true)`
+  only for debuggable apps. The desktop CLI can locate
+  `webview_devtools_remote_*` from `/proc/net/unix`, match it to the target
+  package pid, forward it through ADB, attach by Chrome DevTools Protocol, and
+  expose `webview-pages`, `webview-network`, and `webview-console` commands.
+- Verification: the native sample on device `b46093e6` exposed
+  `webview_devtools_remote_15747`; `webview-pages` listed the `Native H5 Test`
+  CDP page; `webview-network` captured a WebView `fetch` request to
+  `/v1/status?from=manual-webview-cdp-2` with method `GET`, HTTP status `200`
+  from `Network.responseReceivedExtraInfo`, and the expected CORS failure log;
+  `webview-console` captured `ai-bridge-webview-console-standalone`.
+- Limitation: release builds that do not enable WebView debugging cannot be
+  attached through normal ADB/CDP. CORS-blocked fetches can still expose status
+  and headers through CDP extra-info events even when page JavaScript receives
+  `TypeError: Failed to fetch`.
 
 ## Android PopupWindow is not included in `/v1/view/tree`
 

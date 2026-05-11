@@ -37,7 +37,8 @@ docs                                  Design, integration, and test notes
 - Local bridge status on the first available port starting at `127.0.0.1:18080`
 - Android View tree, window tree, and screenshots
 - Native UI tap support, with desktop-side ADB / UIAutomator fallback operations
-- Native Android WebView DOM snapshots and JavaScript evaluation
+- Native Android WebView DOM snapshots, JavaScript evaluation, and debug
+  DevTools/CDP network/console capture
 - Flutter Widget snapshots, semantic action metadata, and runtime action handling
 - Flutter H5 adapter registry for exposing Dart-side WebViews to AI agents
 - Logs, network requests, state records, and event buffers with incremental `sinceId` / `sinceMs` reads
@@ -64,7 +65,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.6")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.7")
 }
 ```
 
@@ -96,7 +97,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.6"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.7"
 }
 
 aiAppBridge {
@@ -112,7 +113,7 @@ If the Android project does not already include JitPack, add `https://jitpack.io
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.6
+  ai_app_bridge_flutter: ^0.1.7
 ```
 
 Initialize once:

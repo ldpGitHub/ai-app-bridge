@@ -3,6 +3,7 @@
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 const path = require('path');
 
 const defaults = {
@@ -29,6 +30,9 @@ Commands:
   keyboard-state         Read Android soft keyboard visibility from dumpsys.
   hide-keyboard          Hide the Android soft keyboard when it is visible.
   install-apk            Install an APK and assist device-side installer screens.
+  webview-pages          List attachable Android WebView DevTools/CDP pages.
+  webview-network        Capture WebView Network events through CDP.
+  webview-console        Capture WebView console/log events through CDP.
   smoke                  Run the native sample smoke test.
   help                   Show this help.
 
@@ -45,6 +49,13 @@ Options:
   --allow-downgrade      Pass -d to adb install.
   --install-timeout-ms <ms>  Timeout for the adb install subprocess.
   --installer-timeout-ms <ms>  Timeout for installer UI confirmation handling.
+  --webview-port <port>  Local port used for WebView DevTools forwarding.
+  --socket-name <name>   Explicit webview_devtools_remote socket name.
+  --target-id <id>       Explicit CDP target/page id.
+  --page-url-filter <s>  Prefer a WebView page whose URL contains this string.
+  --duration-ms <ms>     CDP capture duration. Defaults to 3000 ms.
+  --script <js>          JavaScript expression to evaluate after CDP attach.
+  --include-response-body  Include response bodies when CDP exposes them.
   --help                 Show this help without touching ADB or the device.`;
 
 if (require.main === module) {
@@ -167,6 +178,12 @@ async function runCommand(command, options, ctx) {
       return hideKeyboard(ctx, options);
     case 'install-apk':
       return installApk(ctx, options);
+    case 'webview-pages':
+      return webviewPages(ctx, options);
+    case 'webview-network':
+      return webviewCdpCapture(ctx, { ...options, captureNetwork: true, captureConsole: true });
+    case 'webview-console':
+      return webviewCdpCapture(ctx, { ...options, captureNetwork: false, captureConsole: true });
     case 'swipe':
       return swipe(
         ctx,
@@ -824,6 +841,571 @@ function withQuery(requestPath, query) {
   }
   const queryString = params.toString();
   return queryString ? `${requestPath}?${queryString}` : requestPath;
+}
+
+async function webviewPages(ctx, options) {
+  const setup = await setupWebViewDevTools(ctx, options, { selectPage: false });
+  const keepForward = booleanOption(options.keepForward);
+  if (!keepForward) {
+    await setup.cleanup();
+  }
+  return {
+    ok: true,
+    transport: 'webview-devtools-cdp',
+    packageName: ctx.packageName,
+    sockets: setup.sockets,
+    selectedSocket: setup.socket,
+    packagePids: setup.packagePids,
+    forward: {
+      localPort: setup.localPort,
+      socketName: setup.socket.name,
+      active: keepForward,
+    },
+    pages: setup.pages,
+    pageCount: setup.pages.length,
+    selectionWarning: setup.selectionWarning || null,
+  };
+}
+
+async function webviewCdpCapture(ctx, options) {
+  const setup = await setupWebViewDevTools(ctx, options, { selectPage: true });
+  const durationMs = Math.max(0, Number(options.durationMs || 3000));
+  const captureNetwork = options.captureNetwork !== false;
+  const captureConsole = options.captureConsole !== false;
+  const includeResponseBody = booleanOption(options.includeResponseBody);
+  const maxEvents = Number(options.maxEvents || 200);
+  const bodyMaxBytes = Number(options.bodyMaxBytes || 64 * 1024);
+  const urlFilter = options.urlFilter || '';
+  const events = [];
+  const requests = new Map();
+  const consoleEvents = [];
+  let scriptResult = null;
+  let cdp = null;
+
+  const handleEvent = (event) => {
+    if (events.length < maxEvents) {
+      events.push({
+        method: event.method,
+        params: summarizeCdpParams(event.method, event.params),
+      });
+    }
+    if (captureNetwork && event.method === 'Network.requestWillBeSent') {
+      const request = event.params?.request || {};
+      if (urlFilter && !String(request.url || '').includes(urlFilter)) return;
+      const entry = requests.get(event.params.requestId) || {};
+      requests.set(event.params.requestId, {
+        ...entry,
+        requestId: event.params.requestId,
+        loaderId: event.params.loaderId,
+        documentURL: event.params.documentURL,
+        type: event.params.type,
+        timestamp: event.params.timestamp,
+        wallTime: event.params.wallTime,
+        method: request.method,
+        url: request.url,
+        requestHeaders: request.headers || {},
+        requestPostData: truncateString(request.postData || '', bodyMaxBytes),
+      });
+      return;
+    }
+    if (captureNetwork && event.method === 'Network.responseReceived') {
+      const response = event.params?.response || {};
+      if (urlFilter && !String(response.url || '').includes(urlFilter)) return;
+      const entry = requests.get(event.params.requestId) || {};
+      requests.set(event.params.requestId, {
+        ...entry,
+        requestId: event.params.requestId,
+        type: event.params.type || entry.type,
+        status: response.status,
+        statusText: response.statusText,
+        responseUrl: response.url,
+        mimeType: response.mimeType,
+        protocol: response.protocol,
+        remoteIPAddress: response.remoteIPAddress,
+        remotePort: response.remotePort,
+        responseHeaders: response.headers || {},
+      });
+      return;
+    }
+    if (captureNetwork && event.method === 'Network.responseReceivedExtraInfo') {
+      const entry = requests.get(event.params.requestId) || {};
+      if (urlFilter && !String(entry.url || entry.responseUrl || '').includes(urlFilter)) return;
+      requests.set(event.params.requestId, {
+        ...entry,
+        requestId: event.params.requestId,
+        status: entry.status ?? event.params.statusCode,
+        responseHeaders: {
+          ...(entry.responseHeaders || {}),
+          ...(event.params.headers || {}),
+        },
+        responseHeadersText: event.params.headersText,
+        resourceIPAddressSpace: event.params.resourceIPAddressSpace,
+      });
+      return;
+    }
+    if (captureNetwork && event.method === 'Network.loadingFinished') {
+      const entry = requests.get(event.params.requestId) || {};
+      requests.set(event.params.requestId, {
+        ...entry,
+        requestId: event.params.requestId,
+        encodedDataLength: event.params.encodedDataLength,
+        finished: true,
+      });
+      return;
+    }
+    if (captureNetwork && event.method === 'Network.loadingFailed') {
+      const entry = requests.get(event.params.requestId) || {};
+      requests.set(event.params.requestId, {
+        ...entry,
+        requestId: event.params.requestId,
+        failed: true,
+        errorText: event.params.errorText,
+        canceled: event.params.canceled,
+        blockedReason: event.params.blockedReason,
+        corsErrorStatus: event.params.corsErrorStatus,
+      });
+      return;
+    }
+    if (captureConsole && event.method === 'Runtime.consoleAPICalled') {
+      consoleEvents.push({
+        type: event.params?.type,
+        timestamp: event.params?.timestamp,
+        args: (event.params?.args || []).map(cdpRemoteValue),
+        stackTrace: event.params?.stackTrace || null,
+      });
+      return;
+    }
+    if (captureConsole && event.method === 'Log.entryAdded') {
+      const entry = event.params?.entry || {};
+      consoleEvents.push({
+        source: entry.source,
+        level: entry.level,
+        text: entry.text,
+        url: entry.url,
+        lineNumber: entry.lineNumber,
+        timestamp: entry.timestamp,
+      });
+    }
+  };
+
+  try {
+    cdp = await CdpSession.open(setup.page.webSocketDebuggerUrl);
+    cdp.onEvent(handleEvent);
+    if (captureNetwork) {
+      await cdp.send('Network.enable');
+    }
+    if (captureConsole) {
+      await cdp.send('Runtime.enable');
+      await cdp.send('Log.enable').catch(() => null);
+    }
+    if (options.script) {
+      scriptResult = await cdp.send('Runtime.evaluate', {
+        expression: String(options.script),
+        awaitPromise: true,
+        returnByValue: true,
+      });
+    }
+    await sleep(durationMs);
+    if (includeResponseBody && captureNetwork) {
+      for (const entry of requests.values()) {
+        if (entry.status === undefined || entry.failed) continue;
+        try {
+          const body = await cdp.send('Network.getResponseBody', { requestId: entry.requestId }, 2500);
+          entry.responseBody = truncateString(body.body || '', bodyMaxBytes);
+          entry.base64Encoded = Boolean(body.base64Encoded);
+        } catch (error) {
+          entry.responseBodyError = firstErrorLine(error);
+        }
+      }
+    }
+  } finally {
+    if (cdp) cdp.close();
+    await setup.cleanup();
+  }
+
+  const requestItems = Array.from(requests.values());
+  return {
+    ok: true,
+    transport: 'webview-devtools-cdp',
+    packageName: ctx.packageName,
+    socket: setup.socket,
+    packagePids: setup.packagePids,
+    page: setup.page,
+    durationMs,
+    captureNetwork,
+    captureConsole,
+    scriptResult: normalizeRuntimeEvaluateResult(scriptResult),
+    counts: {
+      events: events.length,
+      requests: requestItems.length,
+      console: consoleEvents.length,
+    },
+    requests: requestItems,
+    console: consoleEvents,
+    events,
+    selectionWarning: setup.selectionWarning || null,
+  };
+}
+
+async function setupWebViewDevTools(ctx, options, behavior = {}) {
+  const packagePids = await packagePidsFor(ctx);
+  const procNetUnix = (await adb(ctx, ['shell', 'cat', '/proc/net/unix'])).stdout;
+  const sockets = parseWebViewDevToolsSockets(procNetUnix, packagePids);
+  if (sockets.length === 0) {
+    throw new Error('no WebView DevTools socket found; make sure the app is running and WebView debugging is enabled');
+  }
+  const choice = chooseWebViewDevToolsSocket(sockets, options, packagePids);
+  if (!choice.socket) {
+    throw new Error(choice.error || 'no matching WebView DevTools socket found');
+  }
+  const localPort = await resolveWebViewDevToolsPort(ctx, options);
+  await removeAdbForwardIfPresent(ctx, localPort);
+  await adb(ctx, ['forward', `tcp:${localPort}`, `localabstract:${choice.socket.name}`]);
+  let pages = [];
+  try {
+    pages = JSON.parse(await httpGet(`http://127.0.0.1:${localPort}/json`));
+    if (!Array.isArray(pages)) pages = [];
+    pages = pages.map((page) => normalizeCdpPage(page, localPort));
+  } catch (error) {
+    await removeAdbForwardIfPresent(ctx, localPort);
+    throw error;
+  }
+  const page = behavior.selectPage === false ? null : chooseWebViewPage(pages, options);
+  if (behavior.selectPage !== false && !page) {
+    await removeAdbForwardIfPresent(ctx, localPort);
+    throw new Error('no attachable WebView CDP page found');
+  }
+  return {
+    sockets,
+    socket: choice.socket,
+    packagePids,
+    selectionWarning: choice.warning,
+    localPort,
+    pages,
+    page,
+    cleanup: () => removeAdbForwardIfPresent(ctx, localPort),
+  };
+}
+
+async function packagePidsFor(ctx) {
+  if (!ctx.packageName) return [];
+  try {
+    const result = await adb(ctx, ['shell', 'pidof', ctx.packageName]);
+    return result.stdout.split(/\s+/).map((value) => value.trim()).filter((value) => /^\d+$/.test(value));
+  } catch (_) {
+    return [];
+  }
+}
+
+function parseWebViewDevToolsSockets(procNetUnix, packagePids = []) {
+  const packagePidSet = new Set(packagePids.map(String));
+  const sockets = [];
+  const seen = new Set();
+  const lines = String(procNetUnix || '').split(/\r?\n/);
+  for (const line of lines) {
+    const matches = line.matchAll(/(?:^|\s|@)(webview_devtools_remote(?:_[^\s@]+)?)/g);
+    for (const match of matches) {
+      const name = match[1];
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const pidMatch = /_(\d+)$/.exec(name);
+      const pid = pidMatch ? pidMatch[1] : null;
+      sockets.push({
+        name,
+        rawName: match[0].trim(),
+        pid,
+        packageMatch: Boolean(pid && packagePidSet.has(pid)),
+        line: line.trim(),
+      });
+    }
+  }
+  return sockets;
+}
+
+function chooseWebViewDevToolsSocket(sockets, options = {}, packagePids = []) {
+  if (options.socketName) {
+    const requested = String(options.socketName).replace(/^@/, '');
+    const socket = sockets.find((item) => item.name === requested);
+    return socket ? { socket } : { error: `requested WebView DevTools socket not found: ${requested}` };
+  }
+  for (const pid of packagePids.map(String)) {
+    const socket = sockets.find((item) => item.pid === pid);
+    if (socket) return { socket };
+  }
+  const matched = sockets.filter((item) => item.packageMatch);
+  if (matched.length > 0) return { socket: matched[0] };
+  if (sockets.length === 1) return { socket: sockets[0] };
+  return {
+    socket: sockets[0],
+    warning: `multiple WebView DevTools sockets found and none matched ${packagePids.join(',') || 'the target package pid'}; selected ${sockets[0].name}`,
+  };
+}
+
+function chooseWebViewPage(pages, options = {}) {
+  if (!Array.isArray(pages) || pages.length === 0) return null;
+  if (options.targetId) {
+    const targetId = String(options.targetId);
+    const byId = pages.find((page) => page.id === targetId);
+    if (byId) return byId;
+  }
+  if (options.pageUrlFilter) {
+    const filter = String(options.pageUrlFilter);
+    const byUrl = pages.find((page) => String(page.url || '').includes(filter));
+    if (byUrl) return byUrl;
+  }
+  return pages.find((page) => page.webSocketDebuggerUrl && page.type === 'page') ||
+    pages.find((page) => page.webSocketDebuggerUrl) ||
+    null;
+}
+
+function normalizeCdpPage(page, localPort) {
+  const normalized = {
+    id: page.id,
+    type: page.type,
+    title: page.title,
+    url: page.url,
+    description: page.description,
+    webSocketDebuggerUrl: page.webSocketDebuggerUrl,
+  };
+  if (normalized.webSocketDebuggerUrl) {
+    normalized.webSocketDebuggerUrl = normalized.webSocketDebuggerUrl.replace(
+      /^ws:\/\/(?:\[::\]|localhost|127\.0\.0\.1):\d+/,
+      `ws://127.0.0.1:${localPort}`,
+    );
+  }
+  return normalized;
+}
+
+async function resolveWebViewDevToolsPort(ctx, options) {
+  const explicit = Number(options.webviewPort || options.devtoolsPort || options.cdpPort || 0);
+  if (Number.isInteger(explicit) && explicit > 0) return explicit;
+  const start = 9222;
+  for (let port = start; port < start + 100; port += 1) {
+    await removeAdbForwardIfPresent(ctx, port);
+    if (await isLocalPortAvailable(port)) return port;
+  }
+  throw new Error('no available local port for WebView DevTools forwarding');
+}
+
+function isLocalPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+async function removeAdbForwardIfPresent(ctx, port) {
+  try {
+    await adb(ctx, ['forward', '--remove', `tcp:${port}`]);
+  } catch (_) {
+    // A missing forward is the common case.
+  }
+}
+
+class CdpSession {
+  constructor(socket) {
+    this.socket = socket;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.eventHandlers = [];
+  }
+
+  static async open(url) {
+    const WebSocketCtor = webSocketConstructor();
+    const socket = new WebSocketCtor(url);
+    await waitForWebSocketOpen(socket, url);
+    const session = new CdpSession(socket);
+    addWebSocketMessageHandler(socket, (data) => {
+      webSocketDataToText(data)
+        .then((text) => session.handleMessage(text))
+        .catch(() => null);
+    });
+    addWebSocketCloseHandler(socket, () => session.rejectAll(new Error('CDP WebSocket closed')));
+    return session;
+  }
+
+  onEvent(handler) {
+    this.eventHandlers.push(handler);
+  }
+
+  send(method, params = {}, timeoutMs = 5000) {
+    const id = this.nextId;
+    this.nextId += 1;
+    const payload = JSON.stringify({ id, method, params });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP timeout: ${method}`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer, method });
+      this.socket.send(payload);
+    });
+  }
+
+  handleMessage(text) {
+    const message = JSON.parse(text);
+    if (message.id !== undefined) {
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      this.pending.delete(message.id);
+      if (message.error) {
+        pending.reject(new Error(`CDP ${pending.method} failed: ${message.error.message || JSON.stringify(message.error)}`));
+      } else {
+        pending.resolve(message.result || {});
+      }
+      return;
+    }
+    if (message.method) {
+      for (const handler of this.eventHandlers) {
+        handler(message);
+      }
+    }
+  }
+
+  rejectAll(error) {
+    for (const [id, pending] of this.pending.entries()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
+  }
+
+  close() {
+    try {
+      this.socket.close();
+    } catch (_) {
+      // Ignore close races.
+    }
+  }
+}
+
+function webSocketConstructor() {
+  if (typeof globalThis.WebSocket === 'function') return globalThis.WebSocket;
+  try {
+    return require('ws');
+  } catch (_) {
+    throw new Error('WebView CDP capture requires Node.js with WebSocket support or the ws package');
+  }
+}
+
+function waitForWebSocketOpen(socket, url) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`CDP WebSocket open timeout: ${url}`)), 10000);
+    const done = (error) => {
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    if (typeof socket.addEventListener === 'function') {
+      socket.addEventListener('open', () => done(), { once: true });
+      socket.addEventListener('error', () => done(new Error(`CDP WebSocket error: ${url}`)), { once: true });
+      return;
+    }
+    socket.once('open', () => done());
+    socket.once('error', (error) => done(error));
+  });
+}
+
+function addWebSocketMessageHandler(socket, handler) {
+  if (typeof socket.addEventListener === 'function') {
+    socket.addEventListener('message', (event) => handler(event.data));
+    return;
+  }
+  socket.on('message', handler);
+}
+
+function addWebSocketCloseHandler(socket, handler) {
+  if (typeof socket.addEventListener === 'function') {
+    socket.addEventListener('close', handler);
+    return;
+  }
+  socket.on('close', handler);
+}
+
+async function webSocketDataToText(data) {
+  if (typeof data === 'string') return data;
+  if (Buffer.isBuffer(data)) return data.toString('utf8');
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('utf8');
+  if (data && typeof data.text === 'function') return data.text();
+  return String(data);
+}
+
+function cdpRemoteValue(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (Object.prototype.hasOwnProperty.call(value, 'value')) return value.value;
+  if (Object.prototype.hasOwnProperty.call(value, 'unserializableValue')) return value.unserializableValue;
+  return value.description || value.type || null;
+}
+
+function normalizeRuntimeEvaluateResult(result) {
+  if (!result) return null;
+  return {
+    result: cdpRemoteValue(result.result),
+    exceptionDetails: result.exceptionDetails || null,
+  };
+}
+
+function summarizeCdpParams(method, params) {
+  if (!params || typeof params !== 'object') return params;
+  if (method === 'Network.requestWillBeSent') {
+    return {
+      requestId: params.requestId,
+      type: params.type,
+      documentURL: params.documentURL,
+      request: {
+        method: params.request?.method,
+        url: params.request?.url,
+      },
+    };
+  }
+  if (method === 'Network.responseReceived') {
+    return {
+      requestId: params.requestId,
+      type: params.type,
+      response: {
+        url: params.response?.url,
+        status: params.response?.status,
+        mimeType: params.response?.mimeType,
+      },
+    };
+  }
+  if (method === 'Network.responseReceivedExtraInfo') {
+    return {
+      requestId: params.requestId,
+      statusCode: params.statusCode,
+      resourceIPAddressSpace: params.resourceIPAddressSpace,
+    };
+  }
+  if (method === 'Network.loadingFinished' || method === 'Network.loadingFailed') {
+    return {
+      requestId: params.requestId,
+      encodedDataLength: params.encodedDataLength,
+      errorText: params.errorText,
+      blockedReason: params.blockedReason,
+    };
+  }
+  if (method === 'Runtime.consoleAPICalled') {
+    return {
+      type: params.type,
+      args: (params.args || []).map(cdpRemoteValue),
+    };
+  }
+  if (method === 'Log.entryAdded') {
+    return params.entry || {};
+  }
+  return params;
+}
+
+function truncateString(value, maxBytes) {
+  const text = String(value || '');
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+  return `${Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8')}...[truncated]`;
 }
 
 async function uiaTree(ctx) {
@@ -2139,6 +2721,20 @@ async function smoke(ctx, options) {
   summary.native.h5WaitOk = true;
   summary.native.h5ScrollOk = true;
 
+  const webviewProbeUrl = `http://127.0.0.1:${ctx.devicePort || ctx.port}/v1/status?from=webview-cdp-smoke`;
+  const webviewCdp = await webviewCdpCapture(ctx, {
+    durationMs: 3000,
+    pageUrlFilter: 'native-webview',
+    urlFilter: 'webview-cdp-smoke',
+    includeResponseBody: true,
+    script: `(() => { const url = ${JSON.stringify(webviewProbeUrl)}; console.log('ai-bridge-webview-cdp-console', url); fetch(url).then((response) => { console.log('ai-bridge-webview-cdp-response', response.status); return response.text(); }).catch((error) => console.log('ai-bridge-webview-cdp-error', error.name + ':' + error.message)); return url; })()`,
+  });
+  const webviewCdpText = JSON.stringify(webviewCdp);
+  assert(webviewCdp.requests.some((item) => String(item.url || item.responseUrl || '').includes('webview-cdp-smoke')), 'WebView CDP captured H5 network request');
+  assert(webviewCdpText.includes('ai-bridge-webview-cdp-console'), 'WebView CDP captured console output');
+  summary.native.webviewCdpOk = true;
+  summary.native.webviewCdpCapture = webviewCdp.counts;
+
   const screenshotPath = options.outFile || path.join(__dirname, 'smoke_screenshot.png');
   const screenshotResult = await screenshot(ctx, screenshotPath);
   assert(screenshotResult.width > 0 && screenshotResult.height > 0, 'adb screenshot has size');
@@ -2355,9 +2951,12 @@ module.exports = {
   isLikelyInstallerSurface,
   nodeTapState,
   normalizeBridgeError,
+  parseWebViewDevToolsSockets,
   parseKeyboardState,
   parseComponentFromWindowLine,
   parseForegroundWindow,
+  chooseWebViewDevToolsSocket,
+  chooseWebViewPage,
   shouldDismissKeyboardForPoint,
 };
 

@@ -11,9 +11,12 @@ const {
   installerButtonTextsForSurface,
   isLikelyInstallerSurface,
   normalizeBridgeError,
+  parseWebViewDevToolsSockets,
   parseKeyboardState,
   parseComponentFromWindowLine,
   parseForegroundWindow,
+  chooseWebViewDevToolsSocket,
+  chooseWebViewPage,
   shouldDismissKeyboardForPoint,
 } = require('../bin/ai-app-bridge.js');
 
@@ -203,4 +206,35 @@ test('installer assistant recognises ROM installer surfaces and safe positive la
   assert.equal(defaultInstallerButtonTexts().includes('Open'), false);
   assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('安装'), false);
   assert.equal(installerButtonTextsForSurface({ finish: false, market: true }).includes('Install'), false);
+});
+
+test('parses and selects WebView DevTools sockets by target package pid', () => {
+  const procNetUnix = [
+    'Num RefCount Protocol Flags Type St Inode Path',
+    '0000000000000000: 00000002 00000000 00010000 0001 01 12345 @webview_devtools_remote_1111',
+    '0000000000000000: 00000002 00000000 00010000 0001 01 12346 @webview_devtools_remote_2222',
+  ].join('\n');
+
+  const sockets = parseWebViewDevToolsSockets(procNetUnix, ['2222']);
+  assert.equal(sockets.length, 2);
+  assert.equal(sockets[1].name, 'webview_devtools_remote_2222');
+  assert.equal(sockets[1].packageMatch, true);
+
+  const selected = chooseWebViewDevToolsSocket(sockets, {}, ['2222']);
+  assert.equal(selected.socket.name, 'webview_devtools_remote_2222');
+
+  const explicit = chooseWebViewDevToolsSocket(sockets, { socketName: '@webview_devtools_remote_1111' }, ['2222']);
+  assert.equal(explicit.socket.name, 'webview_devtools_remote_1111');
+});
+
+test('selects WebView CDP page by target id, URL filter, then first page', () => {
+  const pages = [
+    { id: 'worker-1', type: 'service_worker', url: 'http://debug.local/worker', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/worker-1' },
+    { id: 'page-1', type: 'page', url: 'http://debug.local/native-webview', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/page-1' },
+    { id: 'page-2', type: 'page', url: 'http://example.test/other', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/page-2' },
+  ];
+
+  assert.equal(chooseWebViewPage(pages, { targetId: 'page-2' }).id, 'page-2');
+  assert.equal(chooseWebViewPage(pages, { pageUrlFilter: 'native-webview' }).id, 'page-1');
+  assert.equal(chooseWebViewPage(pages, {}).id, 'page-1');
 });

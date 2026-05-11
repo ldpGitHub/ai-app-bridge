@@ -160,6 +160,34 @@ function toolDefinitions() {
       clear: { type: 'boolean', description: 'Clear logcat before reading/following.' },
     }),
     bridgeTool('network', 'Read generic in-app network records.'),
+    bridgeTool('webview_pages', 'List attachable Android WebView DevTools/CDP pages for the target package.', {
+      webviewPort: { type: 'number', description: 'Local port used for adb forward. Defaults to the first free port at or above 9222.' },
+      socketName: { type: 'string', description: 'Explicit webview_devtools_remote socket name.' },
+      targetId: { type: 'string', description: 'Optional CDP target/page id.' },
+      pageUrlFilter: { type: 'string', description: 'Prefer a WebView page whose URL contains this string.' },
+      keepForward: { type: 'boolean', description: 'Leave the adb forward active after listing pages.' },
+    }),
+    bridgeTool('webview_network', 'Capture WebView fetch/XHR/resource Network events through Chrome DevTools Protocol.', {
+      webviewPort: { type: 'number', description: 'Local port used for adb forward. Defaults to the first free port at or above 9222.' },
+      socketName: { type: 'string', description: 'Explicit webview_devtools_remote socket name.' },
+      targetId: { type: 'string', description: 'Optional CDP target/page id.' },
+      pageUrlFilter: { type: 'string', description: 'Prefer a WebView page whose URL contains this string.' },
+      urlFilter: { type: 'string', description: 'Only retain Network requests whose URL contains this string.' },
+      durationMs: { type: 'number', description: 'Capture duration after attach. Defaults to 3000 ms.' },
+      script: { type: 'string', description: 'JavaScript expression to evaluate after Network/Runtime are enabled.' },
+      includeResponseBody: { type: 'boolean', description: 'Fetch response bodies with Network.getResponseBody when available.' },
+      bodyMaxBytes: { type: 'number', description: 'Maximum response/request body bytes retained per event.' },
+      maxEvents: { type: 'number', description: 'Maximum raw CDP events retained. Defaults to 200.' },
+    }),
+    bridgeTool('webview_console', 'Capture WebView console and log events through Chrome DevTools Protocol.', {
+      webviewPort: { type: 'number', description: 'Local port used for adb forward. Defaults to the first free port at or above 9222.' },
+      socketName: { type: 'string', description: 'Explicit webview_devtools_remote socket name.' },
+      targetId: { type: 'string', description: 'Optional CDP target/page id.' },
+      pageUrlFilter: { type: 'string', description: 'Prefer a WebView page whose URL contains this string.' },
+      durationMs: { type: 'number', description: 'Capture duration after attach. Defaults to 3000 ms.' },
+      script: { type: 'string', description: 'JavaScript expression to evaluate after Runtime is enabled.' },
+      maxEvents: { type: 'number', description: 'Maximum raw CDP events retained. Defaults to 200.' },
+    }),
     bridgeTool('state', 'Read generic in-app state records.'),
     bridgeTool('events', 'Read generic in-app event records.'),
     bridgeTool('uia_tree', 'Read UIAutomator XML for the current device window.'),
@@ -301,6 +329,9 @@ async function callTool(name, args) {
     input_text: 'input-text',
     keyboard_state: 'keyboard-state',
     hide_keyboard: 'hide-keyboard',
+    webview_pages: 'webview-pages',
+    webview_network: 'webview-network',
+    webview_console: 'webview-console',
     permission_state: 'permission-state',
     permission_grant: 'permission-grant',
     permission_revoke: 'permission-revoke',
@@ -335,6 +366,16 @@ async function runBridge(command, args) {
   addArg(cliArgs, 'streaming', args.streaming);
   addArg(cliArgs, 'install-timeout-ms', args.installTimeoutMs);
   addArg(cliArgs, 'installer-timeout-ms', args.installerTimeoutMs);
+  addArg(cliArgs, 'webview-port', args.webviewPort);
+  addArg(cliArgs, 'socket-name', args.socketName);
+  addArg(cliArgs, 'target-id', args.targetId);
+  addArg(cliArgs, 'page-url-filter', args.pageUrlFilter);
+  addArg(cliArgs, 'url-filter', args.urlFilter);
+  addArg(cliArgs, 'duration-ms', args.durationMs);
+  addArg(cliArgs, 'include-response-body', args.includeResponseBody);
+  addArg(cliArgs, 'body-max-bytes', args.bodyMaxBytes);
+  addArg(cliArgs, 'max-events', args.maxEvents);
+  addArg(cliArgs, 'keep-forward', args.keepForward);
   addArg(cliArgs, 'key-code', args.keyCode);
   addArg(cliArgs, 'permission', args.permission);
   addArg(cliArgs, 'op', args.op);

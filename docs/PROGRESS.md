@@ -1,5 +1,37 @@
 # Progress
 
+## 2026-05-12
+
+- Added WebView DevTools/CDP capture for debuggable Android WebViews:
+  - Android runtime `0.1.7` enables WebView debugging only when the host app is
+    debuggable.
+  - Desktop CLI `0.1.12` exposes `webview-pages`, `webview-network`, and
+    `webview-console`; MCP exposes matching tools.
+  - `webview-network` captures H5 request URL/method/headers, response status
+    and headers when CDP exposes them, loading failures, and console/log output.
+- Validation completed on device `b46093e6`:
+  - `npm run check` passed with 13 `node:test` tests.
+  - Android runtime and Gradle plugin build plus `publishToMavenLocal` passed.
+  - Flutter `flutter analyze --no-pub` passed.
+  - Native sample `:app:assembleDebug` passed and `install-apk` completed as
+    `installMode=reinstall`.
+  - `webview-pages` found `webview_devtools_remote_15747` and listed the
+    sample `Native H5 Test` page.
+  - `webview-network` captured a WebView `fetch` to
+    `/v1/status?from=manual-webview-cdp-2` with method `GET` and HTTP status
+    `200` from CDP extra-info, plus the expected CORS console error.
+  - `webview-console` captured `ai-bridge-webview-console-standalone`.
+  - Final sample smoke passed with WebView CDP counts `events=10`,
+    `requests=1`, and `console=5`.
+  - `D:\TestProject\flutter_inappwebview` Android example was launched on the
+    same device with its existing AI bridge probe. `webview-network` attached
+    to `webview_devtools_remote_18559`, captured the page
+    `https://debug.local/ai-bridge-probe/run/0`, proved a blocked cleartext H5
+    fetch reports `net::ERR_CLEARTEXT_NOT_PERMITTED`, and then captured an
+    HTTPS H5 fetch to `https://httpbin.org/get?from=testproject-webview-cdp-https`
+    with method `GET`, status `200`, response headers, response body, and
+    console message `ai-bridge-testproject-cdp-https-response 200`.
+
 ## 2026-05-11
 
 - Release-candidate validation for Android `0.1.6` and desktop CLI `0.1.11`

@@ -20,7 +20,7 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.6")
+    debugImplementation("com.github.ldpGitHub.ai-app-bridge:ai-app-bridge-android:0.1.7")
 }
 ```
 
@@ -58,7 +58,7 @@ pluginManagement {
 
 ```kotlin
 plugins {
-    id("io.github.lidongping.aiappbridge.android") version "0.1.6"
+    id("io.github.lidongping.aiappbridge.android") version "0.1.7"
 }
 
 aiAppBridge {
@@ -74,7 +74,7 @@ If the Android project does not already include JitPack, add `https://jitpack.io
 
 ```yaml
 dependencies:
-  ai_app_bridge_flutter: ^0.1.6
+  ai_app_bridge_flutter: ^0.1.7
 ```
 
 Initialize once:
@@ -110,10 +110,14 @@ AiAppBridge.instance.registerH5Adapter(
 npm install -g @lidongping/ai-app-bridge
 
 ai-app-bridge status --package-name <android.package>
+ai-app-bridge webview-pages --package-name <android.package>
+ai-app-bridge webview-network --package-name <android.package> --duration-ms 3000
 ai-app-bridge-mcp
 ```
 
 The desktop tool owns ADB port forwarding, UIAutomator, screenshots, input, permission dialogs, and MCP transport.
+For debuggable WebViews with WebView debugging enabled, it can also attach to
+the WebView DevTools socket and collect CDP Network and console events.
 
 ## Compatibility Notes
 

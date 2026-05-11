@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.database.Cursor
 import android.net.Uri
 import android.os.Process
+import android.webkit.WebView
 import java.io.File
 
 class AiAppBridgeInitProvider : ContentProvider() {
@@ -14,10 +15,21 @@ class AiAppBridgeInitProvider : ContentProvider() {
         val appContext = context?.applicationContext ?: return true
         val debuggable =
             appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (debuggable) {
+            enableWebViewDebugging()
+        }
         if (debuggable && isMainProcess(appContext)) {
             AiAppBridge.start(appContext)
         }
         return true
+    }
+
+    private fun enableWebViewDebugging() {
+        try {
+            WebView.setWebContentsDebuggingEnabled(true)
+        } catch (_: Throwable) {
+            // Some OEM WebView implementations can throw before WebView is ready.
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.EditText
@@ -151,8 +152,12 @@ class DebugBridgeNativeTestActivity : Activity() {
                 id = R.id.ai_app_native_test_webview
                 contentDescription = "native_h5_webview"
                 settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
                 loadDataWithBaseURL(
-                    "https://debug.local/native-webview",
+                    "http://debug.local/native-webview",
                     nativeH5Html,
                     "text/html",
                     "UTF-8",
@@ -402,6 +407,27 @@ class DebugBridgeNativeTestActivity : Activity() {
                 <p id="native-h5-body">H5 DOM snapshot body text</p>
                 <input id="native-h5-input" aria-label="Native H5 Input" value="h5 initial value" />
                 <button id="native-h5-button" aria-label="Native H5 Button" onclick="document.getElementById('native-h5-body').innerText='Native H5 clicked';">Native H5 Button</button>
+                <button id="native-h5-fetch-button" aria-label="Native H5 Fetch Button" onclick="runAiBridgeWebViewProbe()">Native H5 Fetch</button>
+                <script>
+                  window.runAiBridgeWebViewProbe = function(port) {
+                    const targetPort = port || 18080;
+                    const url = 'http://127.0.0.1:' + targetPort + '/v1/status?from=webview-cdp-fixture';
+                    console.log('ai-bridge-webview-console-start', url);
+                    return fetch(url)
+                      .then(function(response) {
+                        console.log('ai-bridge-webview-fetch-response', response.status, url);
+                        return response.text();
+                      })
+                      .then(function(body) {
+                        document.getElementById('native-h5-body').innerText = 'Native H5 fetch finished';
+                        return body.length;
+                      })
+                      .catch(function(error) {
+                        console.log('ai-bridge-webview-fetch-error', error.name + ':' + error.message);
+                        throw error;
+                      });
+                  };
+                </script>
               </body>
             </html>
         """
