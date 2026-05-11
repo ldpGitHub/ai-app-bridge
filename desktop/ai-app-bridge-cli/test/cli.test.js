@@ -11,7 +11,10 @@ const {
   compactStatus,
   compactUiaTree,
   defaultInstallerButtonTexts,
+  findFlutterNode,
   findTappableNodeByText,
+  flutterNodePoint,
+  flutterPhysicalViewport,
   helpText,
   installerButtonTextsForSurface,
   isLikelyInstallerSurface,
@@ -159,6 +162,47 @@ test('tap-text candidate selection reports offscreen-only bridge match', () => {
   const match = findTappableNodeByText(tree, 'Hidden Action');
   assert.equal(match.node, null);
   assert.equal(match.rejected.reason, 'center_outside_viewport');
+});
+
+test('flutter tap fallback resolves operable text to physical coordinates', () => {
+  const viewport = {
+    devicePixelRatio: 3.5,
+    logicalWidth: 361.14285714285717,
+    logicalHeight: 794.2857142857143,
+    physicalWidth: 1264,
+    physicalHeight: 2780,
+  };
+  const operable = {
+    viewport,
+    nodes: [
+      {
+        text: 'Run AI Bridge Probe',
+        actions: ['tap'],
+        tap: {
+          bounds: {
+            left: 54,
+            top: 222,
+            right: 176.9781265258789,
+            bottom: 242,
+            centerX: 115.48906326293945,
+            centerY: 232,
+          },
+        },
+      },
+    ],
+  };
+
+  const node = findFlutterNode(operable, 'Run AI Bridge Probe', 'tap');
+  assert.equal(node.text, 'Run AI Bridge Probe');
+  assert.deepEqual(flutterNodePoint(node.tap.bounds, viewport), { x: 404, y: 812 });
+  assert.deepEqual(flutterPhysicalViewport(viewport), {
+    left: 0,
+    top: 0,
+    right: 1264,
+    bottom: 2780,
+    width: 1264,
+    height: 2780,
+  });
 });
 
 test('parses visible Android keyboard state from dumpsys input_method markers', () => {

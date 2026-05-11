@@ -2162,6 +2162,10 @@ async function tapText(ctx, targetText, options = {}) {
   let xml = await uiaTree(ctx);
   let uiaNode = findUiaNodeByText(xml, targetText);
   if (!uiaNode) {
+    const flutterTap = await tryTapFlutterText(ctx, targetText, options);
+    if (flutterTap) {
+      return flutterTap;
+    }
     if (bridgeMatch.rejected) {
       return {
         ok: false,
@@ -2173,7 +2177,7 @@ async function tapText(ctx, targetText, options = {}) {
         viewport: bridgeMatch.rejected.viewport || null,
       };
     }
-    throw new Error(`text not found in Android bridge tree or UIAutomator tree: ${targetText}`);
+    throw new Error(`text not found in Android bridge tree, UIAutomator tree, or Flutter operable tree: ${targetText}`);
   }
   let x = Math.round((uiaNode.left + uiaNode.right) / 2);
   let y = Math.round((uiaNode.top + uiaNode.bottom) / 2);
@@ -2502,13 +2506,44 @@ async function flutterAction(ctx, payload) {
   return { ...result, transport: 'bridge', source: 'flutter-runtime-action', request: payload };
 }
 
-async function tapFlutterText(ctx, targetText) {
-  const operable = await flutterNodes(ctx);
-  const node = findFlutterNode(operable, targetText, 'tap');
+async function tryTapFlutterText(ctx, targetText, options = {}) {
+  try {
+    return await tapFlutterText(ctx, targetText, options);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function tapFlutterText(ctx, targetText, options = {}) {
+  let operable = await flutterNodes(ctx);
+  let node = findFlutterNode(operable, targetText, 'tap');
   if (!node) {
     throw new Error(`flutter tap node not found: ${targetText}`);
   }
-  const point = flutterNodePoint(node.tap?.bounds || node.bounds, operable.viewport);
+  let point = flutterNodePoint(node.tap?.bounds || node.bounds, operable.viewport);
+  let keyboard = null;
+  if (!booleanOption(options.noAutoHideKeyboard)) {
+    keyboard = await maybeHideKeyboardForPoint(ctx, point, flutterPhysicalViewport(operable.viewport));
+    if (keyboard.decision?.dismiss && !keyboard.dismissed) {
+      return {
+        ok: false,
+        error: 'keyboard_obscures_target',
+        targetText,
+        source: 'flutter-operable-tree',
+        x: point.x,
+        y: point.y,
+        keyboard,
+      };
+    }
+    if (keyboard.dismissed) {
+      operable = await flutterNodes(ctx);
+      const refreshedNode = findFlutterNode(operable, targetText, 'tap');
+      if (refreshedNode) {
+        node = refreshedNode;
+        point = flutterNodePoint(node.tap?.bounds || node.bounds, operable.viewport);
+      }
+    }
+  }
   await tap(ctx, point.x, point.y);
   return {
     ok: true,
@@ -2518,6 +2553,7 @@ async function tapFlutterText(ctx, targetText) {
     node,
     x: point.x,
     y: point.y,
+    keyboard,
   };
 }
 
@@ -2591,6 +2627,20 @@ function flutterNodePoint(bounds, viewport) {
   return {
     x: Math.round(Number(bounds.centerX ?? ((bounds.left + bounds.right) / 2)) * dpr),
     y: Math.round(Number(bounds.centerY ?? ((bounds.top + bounds.bottom) / 2)) * dpr),
+  };
+}
+
+function flutterPhysicalViewport(viewport) {
+  const width = Number(viewport?.physicalWidth || viewport?.width || viewport?.logicalWidth || 0);
+  const height = Number(viewport?.physicalHeight || viewport?.height || viewport?.logicalHeight || 0);
+  if (!width || !height) return null;
+  return {
+    left: 0,
+    top: 0,
+    right: width,
+    bottom: height,
+    width,
+    height,
   };
 }
 
@@ -3730,8 +3780,11 @@ module.exports = {
   compactBridgeTree,
   compactStatus,
   compactUiaTree,
+  findFlutterNode,
   findTappableNodeByText,
   firstErrorLine,
+  flutterNodePoint,
+  flutterPhysicalViewport,
   helpText,
   installerButtonTextsForSurface,
   isLikelyInstallerSurface,

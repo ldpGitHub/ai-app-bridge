@@ -458,3 +458,22 @@
 - Network redaction was verified with a synthetic `/v1/network` payload:
   `mobile`, `token`, `Authorization`, `phone`, and nested `mobileToken` values
   were captured as `[redacted]`.
+- `flutter_inappwebview_android/example` was revalidated with hosted
+  `ai_app_bridge_flutter 0.1.9` and desktop CLI `0.1.18`/local `0.1.19`
+  changes. `flutter pub get`, `flutter test`, `flutter build apk --debug`,
+  and `install-apk` all passed. `/v1/status` reported bridge runtime `0.1.8`,
+  Flutter layout, H5 DOM body text, H5 controls, logs, states, and events.
+  `webview-pages` selected the package WebView DevTools socket and listed one
+  page for `AI Bridge H5 Probe`.
+- A confirmed CLI gap was found and fixed: generic `tap-text` did not fall
+  back to Flutter operable nodes even though `wait-text` could see them. After
+  the fix, `tap-text "Run AI Bridge Probe"` returned
+  `source=flutter-operable-tree`, tapped physical coordinates `404,812`, and
+  the app advanced to `Flutter probe run #2`.
+- WebView DevTools/CDP validation on the same app passed: `webview-console`
+  captured `AI_BRIDGE_CDP_CONSOLE_2225` and also triggered the H5 button via
+  script; `wait-text "H5 event button_click acknowledged #1"` passed and
+  `/v1/logs` captured the H5 payload. `webview-network` captured a
+  `GET https://example.com/?ai_bridge_probe=2225` fetch with
+  `Network.requestWillBeSent`, `Network.responseReceived`, HTTP `200`, and the
+  WebView user agent/request headers.

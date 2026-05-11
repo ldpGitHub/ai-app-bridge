@@ -4,6 +4,33 @@ This file records issues found while using ai-app-bridge as a development loop
 for real Android apps. Keep each item evidence-based and include the current
 workaround when one exists.
 
+## `tap-text` could not operate Flutter-only controls
+
+- Status: fixed in desktop CLI `0.1.19`
+- Found while validating:
+  `D:\TestProject\flutter_inappwebview\flutter_inappwebview_android\example`
+- Evidence:
+  - `wait-text "Run AI Bridge Probe" --require-text "AI Bridge Probe Banner"`
+    passed because the text was present in the Flutter operable snapshot.
+  - `tree --compact --text-filter "Run AI"` and
+    `uia-tree --compact --text-filter "Run AI"` both returned no nodes.
+  - `flutter-tree` showed an operable `Text` node for
+    `Run AI Bridge Probe` with tap bounds and viewport
+    `devicePixelRatio=3.5`, but `tap-text "Run AI Bridge Probe"` failed with
+    `text not found in Android bridge tree or UIAutomator tree`.
+- Impact: AI loops using the generic `tap-text` command could verify Flutter
+  text with `wait-text` but then fail to operate the same current-screen
+  Flutter control unless they knew to call a Flutter-specific action.
+- Fix: `tap-text` now falls back to the Flutter operable tree when Android
+  bridge tree and UIAutomator do not contain the target. It converts Flutter
+  logical bounds to physical ADB coordinates and keeps the keyboard-risk guard
+  active for Flutter fallback taps.
+- Verification: desktop CLI `npm run check` passed 25 tests, including a
+  regression for Flutter operable coordinate conversion. On device
+  `b46093e6`, `tap-text "Run AI Bridge Probe"` returned
+  `source="flutter-operable-tree"`, tapped physical coordinates `404,812`, and
+  `wait-text "Flutter probe run #2" --require-text "phase=h5_loaded"` passed.
+
 ## Flutter capture strings with spaces can be truncated through MethodChannel
 
 - Status: fixed in Flutter package `0.1.9`
