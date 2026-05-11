@@ -5,6 +5,8 @@ const test = require('node:test');
 
 const {
   buildBridgeFailureResult,
+  compactBridgeTree,
+  compactUiaTree,
   defaultInstallerButtonTexts,
   findTappableNodeByText,
   helpText,
@@ -13,6 +15,7 @@ const {
   normalizeBridgeError,
   parseWebViewDevToolsSockets,
   parseKeyboardState,
+  parseUiaBounds,
   parseUiaViewport,
   parseComponentFromWindowLine,
   parseForegroundWindow,
@@ -195,6 +198,78 @@ test('parses UIAutomator root viewport for keyboard-aware fallback taps', () => 
     width: 1264,
     height: 2780,
   });
+});
+
+test('parses UIAutomator bounds strings', () => {
+  assert.deepEqual(parseUiaBounds('[10,20][30,45]'), {
+    left: 10,
+    top: 20,
+    right: 30,
+    bottom: 45,
+    width: 20,
+    height: 25,
+  });
+  assert.equal(parseUiaBounds(''), null);
+});
+
+test('compacts bridge tree by text and max nodes', () => {
+  const compact = compactBridgeTree({
+    activity: 'ExampleActivity',
+    nodeCount: 4,
+    root: {
+      className: 'android.widget.FrameLayout',
+      bounds: { left: 0, top: 0, right: 100, bottom: 200, width: 100, height: 200 },
+      children: [
+        {
+          className: 'android.widget.TextView',
+          resourceName: 'app:id/title',
+          text: 'OpenAI result',
+          visible: true,
+          effectiveVisible: true,
+          bounds: { left: 0, top: 20, right: 100, bottom: 60, width: 100, height: 40 },
+        },
+        {
+          className: 'android.widget.TextView',
+          text: 'Other result',
+          visible: true,
+          effectiveVisible: true,
+          bounds: { left: 0, top: 80, right: 100, bottom: 120, width: 100, height: 40 },
+        },
+      ],
+    },
+  }, {
+    textFilter: 'openai',
+    maxNodes: 1,
+  });
+
+  assert.equal(compact.ok, true);
+  assert.equal(compact.source, 'bridge-tree');
+  assert.equal(compact.nodes.length, 1);
+  assert.equal(compact.nodes[0].text, 'OpenAI result');
+  assert.equal(compact.activity, 'ExampleActivity');
+});
+
+test('compacts UIAutomator tree by resource id and visible viewport', () => {
+  const compact = compactUiaTree(
+    [
+      '<hierarchy>',
+      '<node index="0" class="android.widget.FrameLayout" bounds="[0,0][100,200]">',
+      '<node index="0" text="OpenAI" resource-id="app:id/title" class="android.widget.TextView" package="app" clickable="false" enabled="true" focusable="false" focused="false" selected="false" scrollable="false" checked="false" bounds="[0,20][100,60]" />',
+      '<node index="1" text="Hidden" resource-id="app:id/title" class="android.widget.TextView" package="app" clickable="false" enabled="true" focusable="false" focused="false" selected="false" scrollable="false" checked="false" bounds="[-100,20][-10,60]" />',
+      '</node>',
+      '</hierarchy>',
+    ].join(''),
+    {
+      resourceIdFilter: 'title',
+      visibleOnly: true,
+    },
+  );
+
+  assert.equal(compact.ok, true);
+  assert.equal(compact.source, 'uiautomator');
+  assert.equal(compact.nodes.length, 1);
+  assert.equal(compact.nodes[0].text, 'OpenAI');
+  assert.equal(compact.nodes[0].resourceId, 'app:id/title');
 });
 
 test('wait-text conditions require page context, activity, and absent text', () => {

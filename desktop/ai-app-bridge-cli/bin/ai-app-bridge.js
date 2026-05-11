@@ -59,6 +59,13 @@ Options:
   --duration-ms <ms>     CDP capture duration. Defaults to 3000 ms.
   --script <js>          JavaScript expression to evaluate after CDP attach.
   --include-response-body  Include response bodies when CDP exposes them.
+  --compact              Return compact tree output for tree/uia-tree.
+  --text-filter <s>      Keep compact tree nodes whose text/description contains this.
+  --resource-id-filter <s> Keep compact tree nodes whose resource id/name contains this.
+  --class-filter <s>     Keep compact tree nodes whose class contains this.
+  --visible-only         Keep only visible/in-viewport compact tree nodes.
+  --max-nodes <n>        Maximum compact tree nodes to return.
+  --max-depth <n>        Maximum compact tree depth to scan.
   --help                 Show this help without touching ADB or the device.`;
 
 if (require.main === module) {
@@ -110,7 +117,7 @@ async function runCommand(command, options, ctx) {
     case 'status':
       return bridgeStatus(ctx);
     case 'tree':
-      return bridgeGet(ctx, '/v1/view/tree');
+      return bridgeTree(ctx, options);
     case 'flutter-tree': {
       const status = await bridgeGet(ctx, '/v1/status');
       return status.flutter?.layout || null;
@@ -164,7 +171,7 @@ async function runCommand(command, options, ctx) {
     case 'flutter-h5-scroll':
       return flutterH5Scroll(ctx, options);
     case 'uia-tree':
-      return uiaTree(ctx);
+      return uiaTreeCommand(ctx, options);
     case 'screenshot':
       return screenshot(ctx, options.outFile || path.join(process.cwd(), 'ai_app_bridge_screenshot.png'));
     case 'tap':
@@ -1417,6 +1424,325 @@ async function uiaTree(ctx) {
     await adb(ctx, ['shell', 'uiautomator', 'dump', remotePath]);
     return (await adb(ctx, ['exec-out', 'cat', remotePath])).stdout;
   }, 4, 500);
+}
+
+async function bridgeTree(ctx, options = {}) {
+  const tree = await bridgeGet(ctx, '/v1/view/tree');
+  return wantsCompactTree(options) ? compactBridgeTree(tree, options) : tree;
+}
+
+async function uiaTreeCommand(ctx, options = {}) {
+  const xml = await uiaTree(ctx);
+  return wantsCompactTree(options) ? compactUiaTree(xml, options) : xml;
+}
+
+function wantsCompactTree(options = {}) {
+  return Boolean(
+    booleanOption(options.compact) ||
+    options.textFilter ||
+    options.resourceIdFilter ||
+    options.classFilter ||
+    options.visibleOnly ||
+    options.maxNodes ||
+    options.maxDepth,
+  );
+}
+
+function compactTreeOptions(options = {}) {
+  return {
+    textFilter: normalizeFilter(options.textFilter || options.targetText),
+    resourceIdFilter: normalizeFilter(options.resourceIdFilter || options.resourceFilter),
+    classFilter: normalizeFilter(options.classFilter),
+    visibleOnly: booleanOption(options.visibleOnly),
+    maxNodes: boundedInteger(options.maxNodes, 80, 1, 1000),
+    maxDepth: boundedInteger(options.maxDepth, Number.POSITIVE_INFINITY, 0, 200),
+  };
+}
+
+function compactBridgeTree(tree, options = {}) {
+  const compactOptions = compactTreeOptions(options);
+  const result = {
+    ok: true,
+    source: 'bridge-tree',
+    compact: true,
+    activity: tree?.activity || null,
+    windowCount: Array.isArray(tree?.windows) ? tree.windows.length : undefined,
+    originalNodeCount: Number.isFinite(Number(tree?.nodeCount)) ? Number(tree.nodeCount) : undefined,
+    options: compactTreeResultOptions(compactOptions),
+    nodes: [],
+    scannedNodes: 0,
+    matchedNodes: 0,
+    truncated: false,
+    updatedAtMs: tree?.updatedAtMs || Date.now(),
+  };
+
+  const roots = [];
+  if (Array.isArray(tree?.windows)) {
+    tree.windows.forEach((windowInfo, index) => {
+      if (windowInfo?.root) {
+        roots.push({
+          root: windowInfo.root,
+          windowType: windowInfo.type || 'window',
+          windowIndex: index,
+          viewport: windowInfo.bounds || windowInfo.root.bounds || null,
+        });
+      }
+    });
+  }
+  if (tree?.root) {
+    roots.push({
+      root: tree.root,
+      windowType: 'root',
+      windowIndex: null,
+      viewport: tree.root.bounds || null,
+    });
+  }
+
+  for (const rootInfo of roots) {
+    visitBridgeTreeNode(rootInfo.root, {
+      result,
+      options: compactOptions,
+      depth: 0,
+      parentPath: '',
+      rootInfo,
+    });
+    if (result.truncated) break;
+  }
+
+  return result;
+}
+
+function visitBridgeTreeNode(node, state) {
+  if (!node || state.result.truncated) return;
+  state.result.scannedNodes += 1;
+
+  const children = Array.isArray(node.children) ? node.children : [];
+  const path = state.parentPath ? `${state.parentPath}.${state.result.scannedNodes}` : String(state.result.scannedNodes);
+  if (state.depth <= state.options.maxDepth && bridgeNodeMatchesCompactFilters(node, state.options, state.rootInfo.viewport)) {
+    state.result.matchedNodes += 1;
+    if (state.result.nodes.length >= state.options.maxNodes) {
+      state.result.truncated = true;
+      return;
+    }
+    state.result.nodes.push(compactBridgeNode(node, {
+      depth: state.depth,
+      path,
+      childCount: children.length,
+      windowType: state.rootInfo.windowType,
+      windowIndex: state.rootInfo.windowIndex,
+    }));
+  }
+
+  if (state.depth >= state.options.maxDepth) return;
+  for (const child of children) {
+    visitBridgeTreeNode(child, {
+      ...state,
+      depth: state.depth + 1,
+      parentPath: path,
+    });
+    if (state.result.truncated) return;
+  }
+}
+
+function bridgeNodeMatchesCompactFilters(node, options, viewport) {
+  if (options.visibleOnly && nodeTapState(node, viewport).ok !== true) return false;
+  const text = compactString(node.text || node.contentDescription || '');
+  const resource = compactString(node.resourceName || node.id || '');
+  const className = compactString(node.className || node.simpleClassName || '');
+  return compactFiltersMatch({ text, resource, className }, options);
+}
+
+function compactBridgeNode(node, extra) {
+  return {
+    depth: extra.depth,
+    path: extra.path,
+    windowType: extra.windowType,
+    windowIndex: extra.windowIndex,
+    className: node.simpleClassName || node.className || '',
+    resourceName: node.resourceName || null,
+    text: node.text || null,
+    contentDescription: node.contentDescription || null,
+    visible: node.visible !== false && node.effectiveVisible !== false,
+    enabled: node.enabled !== false,
+    clickable: Boolean(node.clickable),
+    focusable: Boolean(node.focusable),
+    focused: Boolean(node.focused),
+    selected: Boolean(node.selected),
+    bounds: compactBounds(node.bounds),
+    childCount: extra.childCount,
+  };
+}
+
+function compactUiaTree(xml, options = {}) {
+  const compactOptions = compactTreeOptions(options);
+  const text = String(xml || '');
+  const viewport = parseUiaViewport(text);
+  const result = {
+    ok: true,
+    source: 'uiautomator',
+    compact: true,
+    rawBytes: Buffer.byteLength(text, 'utf8'),
+    viewport,
+    options: compactTreeResultOptions(compactOptions),
+    nodes: [],
+    scannedNodes: 0,
+    matchedNodes: 0,
+    truncated: false,
+    updatedAtMs: Date.now(),
+  };
+
+  const tokenRegex = /<\/node>|<node\b[^>]*\/?>/g;
+  let depth = -1;
+  let token;
+  while ((token = tokenRegex.exec(text)) !== null) {
+    const tag = token[0];
+    if (tag.startsWith('</node')) {
+      depth = Math.max(-1, depth - 1);
+      continue;
+    }
+
+    depth += 1;
+    result.scannedNodes += 1;
+    const attrs = parseXmlAttributes(tag);
+    const node = compactUiaNode(attrs, depth, result.scannedNodes);
+    if (depth <= compactOptions.maxDepth && uiaNodeMatchesCompactFilters(node, compactOptions, viewport)) {
+      result.matchedNodes += 1;
+      if (result.nodes.length >= compactOptions.maxNodes) {
+        result.truncated = true;
+        break;
+      }
+      result.nodes.push(node);
+    }
+    if (tag.endsWith('/>')) {
+      depth = Math.max(-1, depth - 1);
+    }
+  }
+
+  return result;
+}
+
+function compactUiaNode(attrs, depth, sequence) {
+  return {
+    depth,
+    sequence,
+    className: attrs.class || '',
+    resourceId: attrs['resource-id'] || null,
+    text: attrs.text || null,
+    contentDescription: attrs['content-desc'] || null,
+    packageName: attrs.package || null,
+    enabled: attrs.enabled !== 'false',
+    clickable: attrs.clickable === 'true',
+    focusable: attrs.focusable === 'true',
+    focused: attrs.focused === 'true',
+    selected: attrs.selected === 'true',
+    scrollable: attrs.scrollable === 'true',
+    checked: attrs.checked === 'true',
+    bounds: compactBounds(parseUiaBounds(attrs.bounds)),
+  };
+}
+
+function uiaNodeMatchesCompactFilters(node, options, viewport) {
+  if (options.visibleOnly && !boundsInViewport(node.bounds, viewport)) return false;
+  return compactFiltersMatch({
+    text: compactString(node.text || node.contentDescription || ''),
+    resource: compactString(node.resourceId || ''),
+    className: compactString(node.className || ''),
+  }, options);
+}
+
+function compactFiltersMatch(values, options) {
+  if (options.textFilter && !values.text.includes(options.textFilter)) return false;
+  if (options.resourceIdFilter && !values.resource.includes(options.resourceIdFilter)) return false;
+  if (options.classFilter && !values.className.includes(options.classFilter)) return false;
+  return true;
+}
+
+function compactTreeResultOptions(options) {
+  return {
+    textFilter: options.textFilter || undefined,
+    resourceIdFilter: options.resourceIdFilter || undefined,
+    classFilter: options.classFilter || undefined,
+    visibleOnly: options.visibleOnly || undefined,
+    maxNodes: options.maxNodes,
+    maxDepth: Number.isFinite(options.maxDepth) ? options.maxDepth : undefined,
+  };
+}
+
+function parseXmlAttributes(tag) {
+  const attrs = {};
+  const attrRegex = /([A-Za-z0-9_:-]+)="([^"]*)"/g;
+  let match;
+  while ((match = attrRegex.exec(String(tag || ''))) !== null) {
+    attrs[match[1]] = decodeXmlAttribute(match[2]);
+  }
+  return attrs;
+}
+
+function decodeXmlAttribute(value) {
+  return String(value || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function parseUiaBounds(value) {
+  const match = /\[(\d+),(\d+)\]\[(\d+),(\d+)\]/.exec(String(value || ''));
+  if (!match) return null;
+  const left = Number(match[1]);
+  const top = Number(match[2]);
+  const right = Number(match[3]);
+  const bottom = Number(match[4]);
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function boundsInViewport(bounds, viewport) {
+  if (!bounds) return false;
+  const width = Number(bounds.width ?? bounds.right - bounds.left);
+  const height = Number(bounds.height ?? bounds.bottom - bounds.top);
+  if (width <= 0 || height <= 0) return false;
+  if (!viewport) return true;
+  const centerX = (Number(bounds.left) + Number(bounds.right)) / 2;
+  const centerY = (Number(bounds.top) + Number(bounds.bottom)) / 2;
+  return centerX >= Number(viewport.left) &&
+    centerX <= Number(viewport.right) &&
+    centerY >= Number(viewport.top) &&
+    centerY <= Number(viewport.bottom);
+}
+
+function compactBounds(bounds) {
+  if (!bounds) return null;
+  return {
+    left: Number(bounds.left),
+    top: Number(bounds.top),
+    right: Number(bounds.right),
+    bottom: Number(bounds.bottom),
+    width: Number(bounds.width ?? bounds.right - bounds.left),
+    height: Number(bounds.height ?? bounds.bottom - bounds.top),
+  };
+}
+
+function normalizeFilter(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function compactString(value) {
+  return String(value || '').toLowerCase();
+}
+
+function boundedInteger(value, fallback, min, max) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(Math.floor(number), max));
 }
 
 async function screenshot(ctx, outFile) {
@@ -3050,6 +3376,8 @@ function requiredNumber(value, name) {
 module.exports = {
   buildBridgeFailureResult,
   defaultInstallerButtonTexts,
+  compactBridgeTree,
+  compactUiaTree,
   findTappableNodeByText,
   firstErrorLine,
   helpText,
@@ -3059,6 +3387,7 @@ module.exports = {
   normalizeBridgeError,
   parseWebViewDevToolsSockets,
   parseKeyboardState,
+  parseUiaBounds,
   parseUiaViewport,
   parseComponentFromWindowLine,
   parseForegroundWindow,
