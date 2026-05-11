@@ -21,6 +21,9 @@ const {
   parseForegroundWindow,
   chooseWebViewDevToolsSocket,
   chooseWebViewPage,
+  shapeNetworkCapture,
+  compactNetworkRecord,
+  shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
   waitTextConditionsMet,
 } = require('../bin/ai-app-bridge.js');
@@ -273,6 +276,88 @@ test('compacts UIAutomator tree by resource id and visible viewport', () => {
   assert.equal(compact.nodes[0].resourceId, 'app:id/title');
 });
 
+test('network output can be filtered and compacted without bodies', () => {
+  const shaped = shapeNetworkCapture({
+    ok: true,
+    type: 'network',
+    count: 3,
+    items: [
+      {
+        id: 1,
+        source: 'okhttp-auto',
+        method: 'GET',
+        url: 'https://example.test/api/feed',
+        statusCode: 200,
+        durationMs: 10,
+        responseHeaders: { 'Content-Type': 'application/json' },
+        responseBody: '{"ok":true}',
+        redacted: true,
+      },
+      {
+        id: 2,
+        source: 'okhttp-auto',
+        method: 'GET',
+        url: 'https://example.test/image.png',
+        statusCode: 200,
+        durationMs: 15,
+        responseHeaders: { 'content-type': 'image/png' },
+        responseBody: '\u0000'.repeat(2000),
+        redacted: true,
+      },
+      {
+        id: 3,
+        source: 'okhttp-auto',
+        method: 'POST',
+        url: 'https://example.test/api/feed',
+        statusCode: 500,
+        durationMs: 20,
+        requestBody: 'request',
+        responseBody: 'error',
+        redacted: true,
+      },
+    ],
+  }, {
+    compact: true,
+    urlFilter: '/api/',
+    method: 'GET',
+    statusCode: 200,
+  });
+
+  assert.equal(shaped.count, 1);
+  assert.equal(shaped.sourceCount, 3);
+  assert.equal(shaped.items[0].url, 'https://example.test/api/feed');
+  assert.equal(shaped.items[0].contentType, 'application/json');
+  assert.equal(Object.prototype.hasOwnProperty.call(shaped.items[0], 'responseBody'), false);
+  assert.equal(shaped.items[0].responseBodyBytes, 11);
+});
+
+test('network output can omit or truncate request and response bodies', () => {
+  const source = {
+    ok: true,
+    type: 'network',
+    count: 1,
+    items: [
+      {
+        id: 1,
+        method: 'POST',
+        url: 'https://example.test/api',
+        requestBody: 'abcdef',
+        responseBody: '0123456789',
+      },
+    ],
+  };
+
+  const truncated = shapeNetworkCapture(source, { bodyMaxBytes: 4 });
+  assert.equal(truncated.items[0].requestBody, 'abcd...[truncated]');
+  assert.equal(truncated.items[0].responseBody, '0123...[truncated]');
+
+  const omitted = shapeNetworkCapture(source, { noBodies: true });
+  assert.equal(Object.prototype.hasOwnProperty.call(omitted.items[0], 'requestBody'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(omitted.items[0], 'responseBody'), false);
+  assert.equal(omitted.items[0].requestBodyOmitted, true);
+  assert.equal(omitted.items[0].responseBodyOmitted, true);
+});
+
 test('wait-text conditions require page context, activity, and absent text', () => {
   const snapshot = {
     text: 'New Task\nBridge Todo\nSave task',
@@ -315,8 +400,28 @@ test('installer assistant recognises ROM installer surfaces and safe positive la
   assert.ok(defaultInstallerButtonTexts().includes('安装'));
   assert.equal(defaultInstallerButtonTexts().includes('打开'), false);
   assert.equal(defaultInstallerButtonTexts().includes('Open'), false);
+  assert.ok(installerButtonTextsForSurface({ finish: true, market: false }).includes('完成'));
+  assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('关闭'), false);
   assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('安装'), false);
+  assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('Install'), false);
+  assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('Close'), false);
+  assert.equal(installerButtonTextsForSurface({ finish: true, market: false }).includes('Open'), false);
   assert.equal(installerButtonTextsForSurface({ finish: false, market: true }).includes('Install'), false);
+});
+
+test('installer assistant can confirm reinstall while avoiding post-install ad taps', () => {
+  assert.equal(shouldSkipInstallerTapForInstalledPackage({
+    phase: 'install-pending',
+    packageState: { installed: true },
+  }), false);
+  assert.equal(shouldSkipInstallerTapForInstalledPackage({
+    phase: 'post-install',
+    packageState: { installed: true },
+  }), true);
+  assert.equal(shouldSkipInstallerTapForInstalledPackage({
+    phase: 'install-pending',
+    packageState: { installed: false },
+  }), false);
 });
 
 test('parses and selects WebView DevTools sockets by target package pid', () => {

@@ -22,6 +22,8 @@ Commands:
   status                 Read bridge status and app/device metadata.
   tree                   Read the Android View tree from the in-app bridge.
   flutter-tree           Read the latest Flutter layout snapshot.
+  logs                   Read generic in-app log records.
+  network                Read generic in-app network records.
   uia-tree               Read UIAutomator XML for the current foreground window.
   screenshot             Capture an ADB screenshot.
   tap-text               Tap a visible node by exact text or content description.
@@ -60,6 +62,11 @@ Options:
   --duration-ms <ms>     CDP capture duration. Defaults to 3000 ms.
   --script <js>          JavaScript expression to evaluate after CDP attach.
   --include-response-body  Include response bodies when CDP exposes them.
+  --url-filter <s>       Keep network records whose URL contains this string.
+  --method <s>           Keep network records with this HTTP method.
+  --status-code <n>      Keep network records with this HTTP status.
+  --no-bodies            Omit requestBody/responseBody from network output.
+  --body-max-bytes <n>   Truncate network request/response bodies.
   --compact              Return compact tree output for tree/uia-tree.
   --text-filter <s>      Keep compact tree nodes whose text/description contains this.
   --resource-id-filter <s> Keep compact tree nodes whose resource id/name contains this.
@@ -142,7 +149,7 @@ async function runCommand(command, options, ctx) {
     case 'logs':
       return bridgeGet(ctx, withQuery('/v1/logs', captureQuery(options)));
     case 'network':
-      return bridgeGet(ctx, withQuery('/v1/network', captureQuery(options)));
+      return networkRecords(ctx, options);
     case 'state':
       return bridgeGet(ctx, withQuery('/v1/state', captureQuery(options)));
     case 'events':
@@ -444,7 +451,7 @@ async function assistInstallerScreens(ctx, options) {
       await sleep(intervalMs);
       continue;
     }
-    if (action.reason === 'not_installer_surface') {
+    if (action.reason === 'not_installer_surface' || action.reason === 'installer_finish_surface_no_action') {
       quietPolls += 1;
       if (quietPolls >= 2) break;
     }
@@ -481,9 +488,12 @@ async function installerAssistOnce(ctx, options = {}) {
     };
   }
 
-  if (ctx.explicitPackageName) {
+  if (ctx.explicitPackageName && !surface.finish) {
     const packageState = await safePackageInstallState(ctx);
-    if (packageState.installed) {
+    if (shouldSkipInstallerTapForInstalledPackage({
+      phase: options.phase || 'installer',
+      packageState,
+    })) {
       return {
         ok: true,
         action: 'none',
@@ -496,17 +506,6 @@ async function installerAssistOnce(ctx, options = {}) {
     }
   }
 
-  if (surface.finish) {
-    return {
-      ok: true,
-      action: 'none',
-      phase: options.phase || 'installer',
-      reason: 'installer_finish_surface_no_action',
-      foreground,
-      surface,
-    };
-  }
-
   const node = findUiaNodeByAny(xml, {
     texts: installerButtonTextsForSurface(surface),
     exact: true,
@@ -514,10 +513,10 @@ async function installerAssistOnce(ctx, options = {}) {
   });
   if (!node) {
     return {
-      ok: false,
+      ok: surface.finish,
       action: 'none',
       phase: options.phase || 'installer',
-      reason: 'installer_button_not_found',
+      reason: surface.finish ? 'installer_finish_surface_no_action' : 'installer_button_not_found',
       foreground,
       surface,
     };
@@ -610,6 +609,14 @@ function classifyInstallerSurface(foreground, xml) {
 }
 
 function installerButtonTextsForSurface(surface) {
+  if (surface?.finish) {
+    return [
+      '完成',
+      '确定',
+      'Done',
+      'OK',
+    ];
+  }
   const base = [
     '继续安装',
     '仍然安装',
@@ -624,7 +631,7 @@ function installerButtonTextsForSurface(surface) {
     'Continue',
     'Next',
   ];
-  if (!surface?.finish && !surface?.market) {
+  if (!surface?.market) {
     base.push('安装', 'Install');
   }
   return base;
@@ -632,6 +639,13 @@ function installerButtonTextsForSurface(surface) {
 
 function defaultInstallerButtonTexts() {
   return installerButtonTextsForSurface({ finish: false, market: false });
+}
+
+function shouldSkipInstallerTapForInstalledPackage({ phase, packageState } = {}) {
+  if (!packageState?.installed) {
+    return false;
+  }
+  return phase !== 'install-pending';
 }
 
 async function ensureForward(ctx) {
@@ -842,6 +856,159 @@ function captureQuery(options) {
     sinceMs: options.sinceMs,
     limit: options.limit,
   };
+}
+
+async function networkRecords(ctx, options = {}) {
+  const capture = await bridgeGet(ctx, withQuery('/v1/network', captureQuery(options)));
+  return shapeNetworkCapture(capture, options);
+}
+
+function shapeNetworkCapture(capture, options = {}) {
+  const sourceItems = Array.isArray(capture?.items) ? capture.items : [];
+  const filteredItems = sourceItems.filter((item) => networkRecordMatches(item, options));
+  const compact = booleanOption(options.compact);
+  const shapedItems = filteredItems.map((item) => (
+    compact ? compactNetworkRecord(item) : shapeNetworkRecord(item, options)
+  ));
+  const result = {
+    ...capture,
+    count: shapedItems.length,
+    items: shapedItems,
+  };
+  if (filteredItems.length !== sourceItems.length) {
+    result.sourceCount = sourceItems.length;
+  }
+  const filters = networkResultOptions(options);
+  if (Object.keys(filters).length > 0) {
+    result.options = filters;
+  }
+  return result;
+}
+
+function networkRecordMatches(record, options = {}) {
+  const urlFilter = options.urlFilter ? String(options.urlFilter) : '';
+  if (urlFilter && !networkRecordUrl(record).includes(urlFilter)) {
+    return false;
+  }
+
+  const method = options.method ? String(options.method).toUpperCase() : '';
+  if (method && networkRecordMethod(record).toUpperCase() !== method) {
+    return false;
+  }
+
+  if (options.statusCode !== undefined && options.statusCode !== null && options.statusCode !== '') {
+    const expectedStatus = Number(options.statusCode);
+    if (!Number.isFinite(expectedStatus) || Number(networkRecordStatus(record)) !== expectedStatus) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function shapeNetworkRecord(record, options = {}) {
+  const shaped = { ...record };
+  const noBodies = booleanOption(options.noBodies);
+  for (const key of ['requestBody', 'responseBody']) {
+    if (!Object.prototype.hasOwnProperty.call(shaped, key)) {
+      continue;
+    }
+    if (noBodies) {
+      shaped[`${key}Omitted`] = true;
+      delete shaped[key];
+      continue;
+    }
+    const bodyMaxBytes = positiveNumber(options.bodyMaxBytes);
+    if (bodyMaxBytes !== null) {
+      shaped[key] = truncateString(shaped[key], bodyMaxBytes);
+    }
+  }
+  return shaped;
+}
+
+function compactNetworkRecord(record) {
+  const result = {
+    id: record?.id,
+    timestampMs: record?.timestampMs,
+    source: record?.source,
+    method: networkRecordMethod(record),
+    url: networkRecordUrl(record),
+    statusCode: networkRecordStatus(record),
+    durationMs: record?.durationMs,
+    error: record?.error || undefined,
+    redacted: record?.redacted,
+  };
+  const contentType = networkRecordContentType(record);
+  if (contentType) {
+    result.contentType = contentType;
+  }
+  if (Object.prototype.hasOwnProperty.call(record || {}, 'requestBody')) {
+    result.requestBodyBytes = bodyByteLength(record.requestBody);
+  }
+  if (Object.prototype.hasOwnProperty.call(record || {}, 'responseBody')) {
+    result.responseBodyBytes = bodyByteLength(record.responseBody);
+  }
+  return pruneUndefined(result);
+}
+
+function networkResultOptions(options = {}) {
+  const result = {};
+  if (booleanOption(options.compact)) result.compact = true;
+  if (options.urlFilter) result.urlFilter = String(options.urlFilter);
+  if (options.method) result.method = String(options.method).toUpperCase();
+  if (options.statusCode !== undefined && options.statusCode !== null && options.statusCode !== '') {
+    result.statusCode = Number(options.statusCode);
+  }
+  if (booleanOption(options.noBodies)) result.noBodies = true;
+  if (positiveNumber(options.bodyMaxBytes) !== null) result.bodyMaxBytes = positiveNumber(options.bodyMaxBytes);
+  return result;
+}
+
+function networkRecordUrl(record) {
+  return String(record?.url || record?.requestUrl || record?.responseUrl || record?.response?.url || '');
+}
+
+function networkRecordMethod(record) {
+  return String(record?.method || record?.requestMethod || record?.request?.method || '');
+}
+
+function networkRecordStatus(record) {
+  return record?.statusCode ?? record?.responseStatusCode ?? record?.status ?? record?.response?.statusCode;
+}
+
+function networkRecordContentType(record) {
+  return headerValue(record?.responseHeaders, 'content-type') ||
+    headerValue(record?.requestHeaders, 'content-type') ||
+    '';
+}
+
+function headerValue(headers, key) {
+  if (!headers || typeof headers !== 'object') {
+    return '';
+  }
+  const expected = key.toLowerCase();
+  for (const [name, value] of Object.entries(headers)) {
+    if (String(name).toLowerCase() === expected) {
+      return String(value);
+    }
+  }
+  return '';
+}
+
+function bodyByteLength(value) {
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  return Buffer.byteLength(String(value), 'utf8');
+}
+
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function pruneUndefined(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
 }
 
 function withQuery(requestPath, query) {
@@ -3394,6 +3561,9 @@ module.exports = {
   parseForegroundWindow,
   chooseWebViewDevToolsSocket,
   chooseWebViewPage,
+  shapeNetworkCapture,
+  compactNetworkRecord,
+  shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
   waitTextConditionsMet,
 };

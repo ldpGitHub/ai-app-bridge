@@ -159,7 +159,14 @@ function toolDefinitions() {
       durationSec: { type: 'number', description: 'Bounded live follow duration. Max 60 seconds.' },
       clear: { type: 'boolean', description: 'Clear logcat before reading/following.' },
     }),
-    bridgeTool('network', 'Read generic in-app network records.'),
+    bridgeTool('network', 'Read generic in-app network records.', {
+      compact: { type: 'boolean', description: 'Return one-line-sized network record summaries without bodies.' },
+      urlFilter: { type: 'string', description: 'Only retain records whose URL contains this string.' },
+      method: { type: 'string', description: 'Only retain records with this HTTP method.' },
+      statusCode: { type: 'number', description: 'Only retain records with this HTTP status.' },
+      noBodies: { type: 'boolean', description: 'Omit requestBody and responseBody fields from full output.' },
+      bodyMaxBytes: { type: 'number', description: 'Maximum request/response body bytes retained per record.' },
+    }),
     bridgeTool('webview_pages', 'List attachable Android WebView DevTools/CDP pages for the target package.', {
       webviewPort: { type: 'number', description: 'Local port used for adb forward. Defaults to the first free port at or above 9222.' },
       socketName: { type: 'string', description: 'Explicit webview_devtools_remote socket name.' },
@@ -371,6 +378,10 @@ async function runBridge(command, args) {
   addArg(cliArgs, 'target-id', args.targetId);
   addArg(cliArgs, 'page-url-filter', args.pageUrlFilter);
   addArg(cliArgs, 'url-filter', args.urlFilter);
+  addArg(cliArgs, 'method', args.method);
+  addArg(cliArgs, 'status-code', args.statusCode);
+  addArg(cliArgs, 'compact', args.compact);
+  addArg(cliArgs, 'no-bodies', args.noBodies);
   addArg(cliArgs, 'duration-ms', args.durationMs);
   addArg(cliArgs, 'include-response-body', args.includeResponseBody);
   addArg(cliArgs, 'body-max-bytes', args.bodyMaxBytes);

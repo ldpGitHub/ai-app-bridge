@@ -16,7 +16,7 @@ group = if (
 } else {
     "io.github.lidongping.aiappbridge"
 }
-version = jitpackVersion ?: "0.1.7"
+version = jitpackVersion ?: "0.1.8"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11

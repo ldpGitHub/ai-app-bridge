@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8
+
+- Uses Android runtime 0.1.8 for debug builds.
+- Skips obvious non-text OkHttp request/response bodies in automatic capture.
+
 ## 0.1.7
 
 - Uses Android runtime 0.1.7 for debug builds.

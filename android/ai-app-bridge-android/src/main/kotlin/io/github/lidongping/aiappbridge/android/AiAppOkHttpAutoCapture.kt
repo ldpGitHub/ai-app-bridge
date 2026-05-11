@@ -139,6 +139,10 @@ object AiAppOkHttpAutoCapture {
             return null
         }
         return try {
+            val contentType = invokeNoArgs(body, "contentType")?.toString()
+            if (!isLikelyTextContentType(contentType)) {
+                return omittedNonTextBody(contentType)
+            }
             val contentLength = (invokeNoArgs(body, "contentLength") as? Long) ?: -1L
             if (contentLength > maxBodyBytes) {
                 return "<omitted: request body too large>"
@@ -157,6 +161,11 @@ object AiAppOkHttpAutoCapture {
             return null
         }
         return try {
+            val body = invokeNoArgs(response, "body")
+            val contentType = invokeNoArgs(body, "contentType")?.toString()
+            if (!isLikelyTextContentType(contentType)) {
+                return omittedNonTextBody(contentType)
+            }
             // peekBody(long) may not exist on OkHttp < 3.12. Gracefully skip response
             // body capture if the method is not found.
             val peekBodyMethod = response.javaClass.methods.firstOrNull { method ->
@@ -167,6 +176,27 @@ object AiAppOkHttpAutoCapture {
         } catch (error: Throwable) {
             "<unavailable: ${error.javaClass.simpleName}>"
         }
+    }
+
+    private fun isLikelyTextContentType(contentType: String?): Boolean {
+        val normalized = contentType?.lowercase()?.trim().orEmpty()
+        if (normalized.isBlank()) {
+            return true
+        }
+        return normalized.startsWith("text/") ||
+            normalized.contains("json") ||
+            normalized.contains("xml") ||
+            normalized.contains("html") ||
+            normalized.contains("javascript") ||
+            normalized.contains("x-www-form-urlencoded") ||
+            normalized.contains("graphql") ||
+            normalized.contains("csv") ||
+            normalized.contains("yaml")
+    }
+
+    private fun omittedNonTextBody(contentType: String?): String {
+        val suffix = contentType?.takeIf { it.isNotBlank() }?.let { "; contentType=$it" }.orEmpty()
+        return "<omitted: non-text body$suffix>"
     }
 
     private fun invokeNoArgs(target: Any?, name: String): Any? {

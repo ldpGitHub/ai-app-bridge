@@ -7,6 +7,7 @@ ai-app-bridge status --package-name io.github.lidongping.aiappbridge.sample
 ai-app-bridge tree --package-name io.github.lidongping.aiappbridge.sample
 ai-app-bridge install-apk --package-name io.github.lidongping.aiappbridge.sample --apk-path app-debug.apk
 ai-app-bridge input-text --text hello --hide-keyboard
+ai-app-bridge network --package-name io.github.lidongping.aiappbridge.sample --compact --url-filter /api/
 ai-app-bridge webview-network --package-name io.github.lidongping.aiappbridge.sample --duration-ms 3000
 ai-app-bridge-mcp
 ```
