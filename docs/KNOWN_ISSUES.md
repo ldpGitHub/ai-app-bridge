@@ -484,6 +484,39 @@ workaround when one exists.
   foregrounded, then returned `ok=false` with `foreground_package_mismatch` after
   pressing Home and capturing the launcher.
 
+## Reused default artifact filenames can make validation evidence stale
+
+- Status: fixed in desktop CLI `0.1.21`
+- Found while validating: `D:\CompanyProject\pos-android`,
+  `PayDialogNew` visual checks on a dual-display K2_MINI device
+- Bridge version: desktop CLI `0.1.8`, app bridge `0.1.8`
+- Evidence:
+  - `screenshot` writes to `ai_app_bridge_screenshot.png` when `--out-file` is
+    omitted.
+  - The native sample smoke flow also reuses `smoke_screenshot.png` when no
+    output path is provided.
+  - During POS payment-dialog validation, repeated bridge screenshots were
+    written through the same default name while the surrounding tool UI could
+    still present an older image preview for that path.
+  - A follow-up check with unique timestamped output paths showed the bridge
+    screenshot and raw `adb exec-out screencap -p` output had the same byte size
+    and hash, so the captured PNG itself matched ADB for display 0.
+  - The device also had a second presentation display, where display 0 showed
+    the cashier payment dialog and display 1 showed a different customer-facing
+    screen. That made stale-path previews and wrong-display assumptions harder
+    to distinguish by eye.
+- Impact: validation evidence can be misread when file-producing commands reuse
+  stable default names. This is not limited to screenshots; any future exported
+  tree, log, report, trace, or MCP artifact with a reused default path can create
+  the same false-current evidence risk.
+- Fix: `screenshot` and `smoke` now generate unique default PNG paths under
+  `ai_app_bridge_artifacts` when `--out-file` is omitted. Screenshot results
+  include artifact metadata, MCP forwards `outFile` and `artifactDir` for
+  screenshot/smoke flows, and MCP defaults generated artifacts to the MCP
+  process working directory rather than the installed package `bin` directory.
+- Verification: desktop CLI `npm run check` passed 28 tests, including
+  regression coverage for generated artifact paths.
+
 ## `tap-text` can report success for a node outside the tappable viewport
 
 - Status: fixed in desktop CLI `0.1.8`

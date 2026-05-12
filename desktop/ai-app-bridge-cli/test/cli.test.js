@@ -7,9 +7,11 @@ const test = require('node:test');
 
 const {
   buildBridgeFailureResult,
+  artifactTimestamp,
   compactBridgeTree,
   compactStatus,
   compactUiaTree,
+  defaultArtifactPath,
   defaultInstallerButtonTexts,
   findFlutterNode,
   findTappableNodeByText,
@@ -31,6 +33,7 @@ const {
   compactNetworkRecord,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
+  screenshotOutputPath,
   statusSearchText,
   uiautomatorLockPath,
   waitTextConditionsMet,
@@ -64,6 +67,41 @@ test('help command prints usage without probing adb', () => {
   });
 
   assert.equal(output, `${helpText}\n`);
+});
+
+test('generated default artifact paths are unique and run-scoped', () => {
+  const first = defaultArtifactPath('ai app bridge screenshot', 'png', {
+    artifactDir: path.join(os.tmpdir(), 'ai-app-bridge-artifact-test'),
+    now: new Date('2026-05-12T10:11:12.123Z'),
+    pid: 42,
+    randomSuffix: 'abc123',
+  });
+  const second = defaultArtifactPath('ai app bridge screenshot', 'png', {
+    artifactDir: path.join(os.tmpdir(), 'ai-app-bridge-artifact-test'),
+    now: new Date('2026-05-12T10:11:12.123Z'),
+    pid: 42,
+    randomSuffix: 'def456',
+  });
+
+  assert.equal(artifactTimestamp(new Date('2026-05-12T10:11:12.123Z')), '20260512-101112-123');
+  assert.equal(path.dirname(first), path.resolve(path.join(os.tmpdir(), 'ai-app-bridge-artifact-test')));
+  assert.equal(path.basename(first), 'ai_app_bridge_screenshot-20260512-101112-123-42-abc123.png');
+  assert.notEqual(first, second);
+});
+
+test('screenshot default output path uses generated artifacts unless explicit', () => {
+  assert.match(
+    screenshotOutputPath({ artifactDir: path.join(os.tmpdir(), 'ai-app-bridge-artifact-test') }),
+    /ai_app_bridge_screenshot-\d{8}-\d{6}-\d{3}-\d+-[a-z0-9]+\.png$/,
+  );
+  assert.match(
+    screenshotOutputPath({ artifactDir: path.join(os.tmpdir(), 'ai-app-bridge-artifact-test') }, 'ai_app_bridge_smoke_screenshot'),
+    /ai_app_bridge_smoke_screenshot-\d{8}-\d{6}-\d{3}-\d+-[a-z0-9]+\.png$/,
+  );
+  assert.equal(
+    screenshotOutputPath({ outFile: path.join(os.tmpdir(), 'custom.png') }),
+    path.join(os.tmpdir(), 'custom.png'),
+  );
 });
 
 test('normalizes socket hang-up as structured not-ready status', () => {

@@ -46,6 +46,7 @@ Options:
   --adb <path>           ADB executable path.
   --adb-timeout-ms <ms>  Timeout for ADB subprocesses.
   --out-file <path>      Screenshot output path.
+  --artifact-dir <path>  Directory for generated screenshot/artifact defaults.
   --apk-path <path>      APK path used by install-apk.
   --text <text>          Text used by input-text.
   --target-text <text>   Text used by tap-text or wait-text.
@@ -183,7 +184,7 @@ async function runCommand(command, options, ctx) {
     case 'uia-tree':
       return uiaTreeCommand(ctx, options);
     case 'screenshot':
-      return screenshot(ctx, options.outFile || path.join(process.cwd(), 'ai_app_bridge_screenshot.png'));
+      return screenshot(ctx, screenshotOutputPath(options, 'ai_app_bridge_screenshot'), options);
     case 'tap':
       return tap(ctx, requiredNumber(options.tapX, 'tapX'), requiredNumber(options.tapY, 'tapY'));
     case 'tap-text':
@@ -2016,7 +2017,7 @@ function boundedInteger(value, fallback, min, max) {
   return Math.max(min, Math.min(Math.floor(number), max));
 }
 
-async function screenshot(ctx, outFile) {
+async function screenshot(ctx, outFile, options = {}) {
   const foreground = await foregroundWindow(ctx);
   const resolvedPath = await adbBinaryToFile(ctx, ['exec-out', 'screencap', '-p'], outFile);
   const size = pngSize(resolvedPath);
@@ -2027,6 +2028,11 @@ async function screenshot(ctx, outFile) {
     path: resolvedPath,
     width: size.width,
     height: size.height,
+    artifact: {
+      path: resolvedPath,
+      generatedDefault: !options.outFile,
+      directory: path.dirname(resolvedPath),
+    },
     foreground,
   };
   if (ctx.packageName) {
@@ -2041,6 +2047,46 @@ async function screenshot(ctx, outFile) {
     }
   }
   return result;
+}
+
+function screenshotOutputPath(options = {}, prefix = 'ai_app_bridge_screenshot') {
+  if (options.outFile) return options.outFile;
+  return defaultArtifactPath(prefix, 'png', { artifactDir: options.artifactDir });
+}
+
+function defaultArtifactPath(prefix, extension, options = {}) {
+  const directory = path.resolve(options.artifactDir || path.join(process.cwd(), 'ai_app_bridge_artifacts'));
+  const suffix = [
+    artifactTimestamp(options.now || new Date()),
+    String(options.pid || process.pid),
+    options.randomSuffix || Math.random().toString(36).slice(2, 8),
+  ].join('-');
+  const name = `${sanitizeArtifactName(prefix)}-${suffix}.${sanitizeArtifactExtension(extension)}`;
+  return path.join(directory, name);
+}
+
+function artifactTimestamp(date) {
+  const value = date instanceof Date ? date : new Date(date);
+  const pad = (number, size = 2) => String(number).padStart(size, '0');
+  return [
+    value.getUTCFullYear(),
+    pad(value.getUTCMonth() + 1),
+    pad(value.getUTCDate()),
+    '-',
+    pad(value.getUTCHours()),
+    pad(value.getUTCMinutes()),
+    pad(value.getUTCSeconds()),
+    '-',
+    pad(value.getUTCMilliseconds(), 3),
+  ].join('');
+}
+
+function sanitizeArtifactName(value) {
+  return String(value || 'artifact').replace(/[^a-zA-Z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '') || 'artifact';
+}
+
+function sanitizeArtifactExtension(value) {
+  return sanitizeArtifactName(String(value || 'bin').replace(/^\.+/, '')) || 'bin';
 }
 
 function pngSize(filePath) {
@@ -3552,13 +3598,14 @@ async function smoke(ctx, options) {
   summary.native.webviewCdpOk = true;
   summary.native.webviewCdpCapture = webviewCdp.counts;
 
-  const screenshotPath = options.outFile || path.join(__dirname, 'smoke_screenshot.png');
-  const screenshotResult = await screenshot(ctx, screenshotPath);
+  const screenshotPath = screenshotOutputPath(options, 'ai_app_bridge_smoke_screenshot');
+  const screenshotResult = await screenshot(ctx, screenshotPath, options);
   assert(screenshotResult.width > 0 && screenshotResult.height > 0, 'adb screenshot has size');
   summary.native.screenshot = {
     width: screenshotResult.width,
     height: screenshotResult.height,
     path: screenshotResult.path,
+    artifact: screenshotResult.artifact,
   };
 
   await tapText(ctx, 'Native Increment');
@@ -3841,9 +3888,11 @@ function requiredNumber(value, name) {
 module.exports = {
   buildBridgeFailureResult,
   defaultInstallerButtonTexts,
+  artifactTimestamp,
   compactBridgeTree,
   compactStatus,
   compactUiaTree,
+  defaultArtifactPath,
   findFlutterNode,
   findTappableNodeByText,
   firstErrorLine,
@@ -3866,6 +3915,7 @@ module.exports = {
   compactNetworkRecord,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
+  screenshotOutputPath,
   statusSearchText,
   uiautomatorLockPath,
   waitTextConditionsMet,

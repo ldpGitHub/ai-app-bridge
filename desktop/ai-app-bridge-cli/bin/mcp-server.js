@@ -293,6 +293,7 @@ function baseSchema(extraProperties = {}, extraRequired = []) {
       packageName: { type: 'string', description: 'Target Android package name. Use this when default 18080 is unreachable or multiple bridge-enabled apps are installed; the CLI discovers the app bridge port from package-private state.' },
       initialRoute: { type: 'string', description: 'Flutter initial route for launch_flutter.' },
       outFile: { type: 'string', description: 'Screenshot output path for screenshot.' },
+      artifactDir: { type: 'string', description: 'Directory for generated default artifacts such as screenshots.' },
       sinceId: { type: 'number', description: 'Capture query lower bound by record id.' },
       sinceMs: { type: 'number', description: 'Capture query lower bound by timestamp milliseconds.' },
       limit: { type: 'number', description: 'Maximum capture records to return.' },
@@ -357,6 +358,7 @@ async function runBridge(command, args) {
   addCommonArgs(cliArgs, args);
   addArg(cliArgs, 'initial-route', args.initialRoute);
   addArg(cliArgs, 'out-file', args.outFile);
+  addArg(cliArgs, 'artifact-dir', args.artifactDir || defaultArtifactDirFor(command, args));
   addArg(cliArgs, 'apk-path', args.apkPath);
   addArg(cliArgs, 'tap-x', args.tapX);
   addArg(cliArgs, 'tap-y', args.tapY);
@@ -424,7 +426,15 @@ async function runBridge(command, args) {
 async function runSmoke(args) {
   const cliArgs = [cliScript, 'smoke'];
   addCommonArgs(cliArgs, args);
+  addArg(cliArgs, 'out-file', args.outFile);
+  addArg(cliArgs, 'artifact-dir', args.artifactDir || defaultArtifactDirFor('smoke', args));
   return runProcess(cliArgs);
+}
+
+function defaultArtifactDirFor(command, args) {
+  if (args.outFile) return '';
+  if (command !== 'screenshot' && command !== 'smoke') return '';
+  return path.join(process.cwd(), 'ai_app_bridge_artifacts');
 }
 
 function addCommonArgs(cliArgs, args) {
