@@ -31,6 +31,7 @@ const {
   chooseWebViewPage,
   shapeNetworkCapture,
   compactNetworkRecord,
+  pruneGeneratedArtifacts,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
   screenshotOutputPath,
@@ -102,6 +103,45 @@ test('screenshot default output path uses generated artifacts unless explicit', 
     screenshotOutputPath({ outFile: path.join(os.tmpdir(), 'custom.png') }),
     path.join(os.tmpdir(), 'custom.png'),
   );
+});
+
+test('generated screenshot artifact pruning keeps the newest 20 per prefix', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-app-bridge-prune-test-'));
+  try {
+    const baseTime = new Date('2026-05-12T10:00:00.000Z').getTime();
+    const makeFile = (name, index) => {
+      const filePath = path.join(directory, name);
+      fs.writeFileSync(filePath, String(index));
+      const mtime = new Date(baseTime + index * 1000);
+      fs.utimesSync(filePath, mtime, mtime);
+      return filePath;
+    };
+
+    for (let index = 0; index < 23; index += 1) {
+      makeFile(`ai_app_bridge_screenshot-20260512-1000${String(index).padStart(2, '0')}-000-42-${String(index).padStart(6, 'a')}.png`, index);
+    }
+    const currentPath = makeFile('ai_app_bridge_screenshot-20260512-100099-000-42-current.png', 99);
+    const smokePath = makeFile('ai_app_bridge_smoke_screenshot-20260512-100000-000-42-smoke1.png', 100);
+    const explicitPath = makeFile('manual.png', 101);
+
+    const result = await pruneGeneratedArtifacts({
+      directory,
+      prefix: 'ai_app_bridge_screenshot',
+      extension: 'png',
+      currentPath,
+    });
+
+    const remaining = fs.readdirSync(directory);
+    const screenshotFiles = remaining.filter((name) => name.startsWith('ai_app_bridge_screenshot-'));
+    assert.equal(result.keep, 20);
+    assert.equal(result.deleted, 4);
+    assert.equal(screenshotFiles.length, 20);
+    assert.equal(fs.existsSync(currentPath), true);
+    assert.equal(fs.existsSync(smokePath), true);
+    assert.equal(fs.existsSync(explicitPath), true);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('normalizes socket hang-up as structured not-ready status', () => {

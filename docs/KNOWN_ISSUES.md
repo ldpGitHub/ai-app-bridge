@@ -486,7 +486,7 @@ workaround when one exists.
 
 ## Reused default artifact filenames can make validation evidence stale
 
-- Status: fixed in desktop CLI `0.1.21`
+- Status: fixed in desktop CLI `0.1.22`
 - Found while validating: `D:\CompanyProject\pos-android`,
   `PayDialogNew` visual checks on a dual-display K2_MINI device
 - Bridge version: desktop CLI `0.1.8`, app bridge `0.1.8`
@@ -514,8 +514,16 @@ workaround when one exists.
   include artifact metadata, MCP forwards `outFile` and `artifactDir` for
   screenshot/smoke flows, and MCP defaults generated artifacts to the MCP
   process working directory rather than the installed package `bin` directory.
-- Verification: desktop CLI `npm run check` passed 28 tests, including
-  regression coverage for generated artifact paths.
+  The CLI keeps the newest 20 generated screenshots for each command prefix and
+  does not prune explicit `--out-file` paths.
+- Verification: desktop CLI `npm run check` passed 29 tests, including
+  regression coverage for generated artifact paths and fixed-count pruning.
+  Real-device validation on TestProject apps
+  `android-architecture-samples`, `AntennaPod`, and `platform_design` produced
+  three unique screenshot paths with `foregroundMatchesPackage=true`; after
+  seeding old generated screenshot names, the artifact directory stayed at 20
+  generated screenshots. A separate explicit `--out-file` screenshot was
+  created without pruning generated artifacts.
 
 ## `tap-text` can report success for a node outside the tappable viewport
 

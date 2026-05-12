@@ -7,6 +7,8 @@ const net = require('net');
 const os = require('os');
 const path = require('path');
 
+const generatedArtifactRetention = 20;
+
 const defaults = {
   adb: process.env.ADB || 'adb',
   adbTimeoutMs: Number(process.env.AI_APP_BRIDGE_ADB_TIMEOUT_MS || 15000),
@@ -2035,6 +2037,14 @@ async function screenshot(ctx, outFile, options = {}) {
     },
     foreground,
   };
+  if (result.artifact.generatedDefault) {
+    result.artifact.retention = await pruneGeneratedArtifacts({
+      directory: result.artifact.directory,
+      prefix: options.artifactPrefix || 'ai_app_bridge_screenshot',
+      extension: 'png',
+      currentPath: resolvedPath,
+    });
+  }
   if (ctx.packageName) {
     result.targetPackageName = ctx.packageName;
   }
@@ -2065,6 +2075,78 @@ function defaultArtifactPath(prefix, extension, options = {}) {
   return path.join(directory, name);
 }
 
+async function pruneGeneratedArtifacts(options = {}) {
+  const keep = generatedArtifactRetention;
+  const result = {
+    keep,
+    matched: 0,
+    deleted: 0,
+  };
+  const directory = path.resolve(options.directory || process.cwd());
+  const prefix = sanitizeArtifactName(options.prefix || 'artifact');
+  const extension = sanitizeArtifactExtension(options.extension || 'bin');
+  const currentPath = options.currentPath ? path.resolve(options.currentPath) : '';
+  const pattern = new RegExp(`^${escapeRegExp(prefix)}-\\d{8}-\\d{6}-\\d{3}-\\d+-[a-z0-9]+\\.${escapeRegExp(extension)}$`);
+
+  let entries;
+  try {
+    entries = await fs.promises.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    return {
+      ...result,
+      error: firstErrorLine(error),
+    };
+  }
+
+  const files = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !pattern.test(entry.name)) {
+      continue;
+    }
+    const filePath = path.join(directory, entry.name);
+    try {
+      const stat = await fs.promises.stat(filePath);
+      files.push({
+        name: entry.name,
+        path: path.resolve(filePath),
+        mtimeMs: stat.mtimeMs,
+      });
+    } catch (_) {
+      // Ignore files that disappear while pruning.
+    }
+  }
+
+  result.matched = files.length;
+  if (files.length <= keep) {
+    return result;
+  }
+
+  files.sort((left, right) => (right.mtimeMs - left.mtimeMs) || right.name.localeCompare(left.name));
+  const keepSet = new Set();
+  if (currentPath) {
+    keepSet.add(currentPath);
+  }
+  for (const file of files) {
+    if (keepSet.size >= keep) {
+      break;
+    }
+    keepSet.add(file.path);
+  }
+
+  for (const file of files) {
+    if (keepSet.has(file.path)) {
+      continue;
+    }
+    try {
+      await fs.promises.rm(file.path, { force: true });
+      result.deleted += 1;
+    } catch (_) {
+      // Pruning is best-effort and should not make screenshot capture fail.
+    }
+  }
+  return result;
+}
+
 function artifactTimestamp(date) {
   const value = date instanceof Date ? date : new Date(date);
   const pad = (number, size = 2) => String(number).padStart(size, '0');
@@ -2087,6 +2169,10 @@ function sanitizeArtifactName(value) {
 
 function sanitizeArtifactExtension(value) {
   return sanitizeArtifactName(String(value || 'bin').replace(/^\.+/, '')) || 'bin';
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function pngSize(filePath) {
@@ -3598,8 +3684,9 @@ async function smoke(ctx, options) {
   summary.native.webviewCdpOk = true;
   summary.native.webviewCdpCapture = webviewCdp.counts;
 
-  const screenshotPath = screenshotOutputPath(options, 'ai_app_bridge_smoke_screenshot');
-  const screenshotResult = await screenshot(ctx, screenshotPath, options);
+  const artifactPrefix = 'ai_app_bridge_smoke_screenshot';
+  const screenshotPath = screenshotOutputPath(options, artifactPrefix);
+  const screenshotResult = await screenshot(ctx, screenshotPath, { ...options, artifactPrefix });
   assert(screenshotResult.width > 0 && screenshotResult.height > 0, 'adb screenshot has size');
   summary.native.screenshot = {
     width: screenshotResult.width,
@@ -3913,6 +4000,7 @@ module.exports = {
   chooseWebViewPage,
   shapeNetworkCapture,
   compactNetworkRecord,
+  pruneGeneratedArtifacts,
   shouldSkipInstallerTapForInstalledPackage,
   shouldDismissKeyboardForPoint,
   screenshotOutputPath,

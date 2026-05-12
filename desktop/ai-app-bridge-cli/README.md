@@ -18,5 +18,6 @@ target app is debuggable and WebView debugging is enabled.
 
 When `screenshot` or `smoke` runs without `--out-file`, the CLI writes a unique
 PNG under `ai_app_bridge_artifacts` instead of reusing a stable filename.
-Use `--artifact-dir` to choose that directory, or `--out-file` when a fixed path
-is intentional.
+It keeps the newest 20 generated screenshots for each command prefix. Use
+`--artifact-dir` to choose that directory, or `--out-file` when a fixed path is
+intentional.
