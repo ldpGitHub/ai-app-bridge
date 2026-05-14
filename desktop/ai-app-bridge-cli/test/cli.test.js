@@ -44,6 +44,10 @@ const {
 
 const cliPath = path.join(__dirname, '..', 'bin', 'ai-app-bridge.js');
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 test('--help prints usage without probing adb', () => {
   const output = execFileSync(process.execPath, [cliPath, '--help'], {
     encoding: 'utf8',
@@ -69,6 +73,18 @@ test('help command prints usage without probing adb', () => {
   });
 
   assert.equal(output, `${helpText}\n`);
+});
+
+test('help documents every implemented CLI command', () => {
+  const source = fs.readFileSync(cliPath, 'utf8');
+  const implementedCommands = [...source.matchAll(/case '([^']+)'/g)]
+    .map((match) => match[1])
+    .sort();
+
+  for (const command of implementedCommands) {
+    assert.match(helpText, new RegExp(`^\\s{2}${escapeRegExp(command)}\\s`, 'm'));
+  }
+  assert.match(helpText, /^\s{2}help\s/m);
 });
 
 test('generated default artifact paths are unique and run-scoped', () => {

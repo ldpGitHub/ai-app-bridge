@@ -24,20 +24,63 @@ const helpText = `Usage: ai-app-bridge <command> [options]
 Commands:
   status                 Read bridge status and app/device metadata.
   tree                   Read the Android View tree from the in-app bridge.
-  flutter-tree           Read the latest Flutter layout snapshot.
-  logs                   Read generic in-app log records.
-  network                Read generic in-app network records.
   uia-tree               Read UIAutomator XML for the current foreground window.
   screenshot             Capture an ADB screenshot.
-  tap-text               Tap a visible node by exact text or content description.
-  wait-text              Wait until text appears in bridge or UIAutomator output.
-  input-text             Type text through ADB input.
-  keyboard-state         Read Android soft keyboard visibility from dumpsys.
-  hide-keyboard          Hide the Android soft keyboard when it is visible.
-  install-apk            Install an APK and assist device-side installer screens.
+  logs                   Read generic in-app log records.
+  logcat                 Read Android logcat through ADB.
+  network                Read generic in-app network records.
+  state                  Read generic in-app state records.
+  events                 Read generic in-app event records.
+
+H5/WebView commands:
+  h5-dom                 Read native Android WebView DOM.
+  h5-eval                Execute JavaScript in the current native WebView.
+  h5-click               Click a native WebView element.
+  h5-input               Set text in a native WebView input.
+  h5-wait                Wait for native WebView text or selector.
+  h5-scroll              Scroll native WebView content.
   webview-pages          List attachable Android WebView DevTools/CDP pages.
   webview-network        Capture WebView Network events through CDP.
   webview-console        Capture WebView console/log events through CDP.
+
+Flutter commands:
+  flutter-tree           Read the latest Flutter layout snapshot.
+  flutter-nodes          Read Flutter operable nodes.
+  flutter-action         Dispatch a raw Flutter action payload.
+  tap-flutter-text       Tap a Flutter node by text.
+  input-flutter-text     Input text through the Flutter action bridge.
+  scroll-flutter         Scroll Flutter content.
+  flutter-h5-dom         Read DOM through a Flutter H5 adapter.
+  flutter-h5-eval        Execute JavaScript through a Flutter H5 adapter.
+  flutter-h5-click       Click a Flutter H5 element.
+  flutter-h5-input       Set text in a Flutter H5 input.
+  flutter-h5-wait        Wait for Flutter H5 text or selector.
+  flutter-h5-scroll      Scroll Flutter H5 content.
+
+Device/action commands:
+  tap                    Tap device coordinates through ADB.
+  tap-text               Tap a visible node by exact text or content description.
+  tap-uia-text           Tap a UIAutomator node by text.
+  wait-text              Wait until text appears in bridge or UIAutomator output.
+  input-text             Type text through ADB input.
+  swipe                  Swipe device coordinates through ADB.
+  keyevent               Send an Android keyevent through ADB.
+  keyboard-state         Read Android soft keyboard visibility from dumpsys.
+  hide-keyboard          Hide the Android soft keyboard when it is visible.
+
+App/permission commands:
+  install-apk            Install an APK and assist device-side installer screens.
+  launch-native-test     Launch the debug native Android bridge test Activity.
+  launch-flutter         Launch the Flutter Activity.
+  permission-state       Read Android runtime permission state.
+  permission-grant       Grant an Android runtime permission.
+  permission-revoke      Revoke an Android runtime permission.
+  permission-dialog      Tap a visible Android permission dialog allow button.
+  appops-set             Set an Android app-op mode.
+
+Advanced commands:
+  forward                Create the ADB port forward for the bridge.
+  remove-forward         Remove the ADB port forward for the bridge.
   smoke                  Run the native sample smoke test.
   help                   Show this help.
 
@@ -51,11 +94,23 @@ Options:
   --artifact-dir <path>  Directory for generated screenshot/artifact defaults.
   --apk-path <path>      APK path used by install-apk.
   --text <text>          Text used by input-text.
+  --value <text>         Text value used by h5-input or flutter-h5-input.
+  --selector <css>       CSS selector used by H5 commands.
   --target-text <text>   Text used by tap-text or wait-text.
+  --tap-x <n>            X coordinate used by tap or Flutter input.
+  --tap-y <n>            Y coordinate used by tap or Flutter input.
+  --start-x <n>          Swipe start X coordinate.
+  --start-y <n>          Swipe start Y coordinate.
+  --end-x <n>            Swipe end X coordinate.
+  --end-y <n>            Swipe end Y coordinate.
+  --key-code <n>         Android key code used by keyevent.
   --require-text <text>  Extra text that must be present for wait-text.
   --absent-text <text>   Text that must be absent for wait-text.
   --require-activity <s> Activity substring that must match for wait-text.
+  --timeout-sec <n>      Wait timeout for wait-text or H5 waits.
+  --interval-ms <ms>     Polling interval for wait/dialog/keyboard helpers.
   --hide-keyboard        Hide the soft keyboard after input-text.
+  --no-auto-hide-keyboard Disable keyboard-risk guard before lower-screen taps.
   --allow-downgrade      Pass -d to adb install.
   --install-timeout-ms <ms>  Timeout for the adb install subprocess.
   --installer-timeout-ms <ms>  Timeout for installer UI confirmation handling.
@@ -66,11 +121,15 @@ Options:
   --duration-ms <ms>     CDP capture duration. Defaults to 3000 ms.
   --script <js>          JavaScript expression to evaluate after CDP attach.
   --include-response-body  Include response bodies when CDP exposes them.
+  --keep-forward         Keep WebView DevTools ADB forward after command exits.
   --url-filter <s>       Keep network records whose URL contains this string.
   --method <s>           Keep network records with this HTTP method.
   --status-code <n>      Keep network records with this HTTP status.
   --no-bodies            Omit requestBody/responseBody from network output.
   --body-max-bytes <n>   Truncate network request/response bodies.
+  --since-id <n>         Incremental capture cursor for logs/network/state/events.
+  --since-ms <n>         Incremental capture timestamp for logs/network/state/events.
+  --limit <n>            Limit capture records.
   --full                 Return full raw status output, including Flutter layout dumps.
   --compact              Return compact tree output for tree/uia-tree.
   --text-filter <s>      Keep compact tree nodes whose text/description contains this.
@@ -79,6 +138,31 @@ Options:
   --visible-only         Keep only visible/in-viewport compact tree nodes.
   --max-nodes <n>        Maximum compact tree nodes to return.
   --max-depth <n>        Maximum compact tree depth to scan.
+  --payload <json>       Raw Flutter action payload for flutter-action.
+  --initial-route <path> Initial route for launch-flutter.
+  --delta <n>            Scroll delta for Flutter/H5 scroll helpers.
+  --delta-x <n>          Horizontal scroll delta.
+  --delta-y <n>          Vertical scroll delta.
+  --max-swipes <n>       Maximum swipes for scroll-flutter by text.
+  --permission <name>    Android permission for permission-* commands.
+  --op <name>            App-op name for appops-set.
+  --mode <mode>          App-op mode for appops-set.
+  --pid <pid|current>    PID filter for logcat.
+  --app-pid              Filter logcat by current app pid.
+  --tag <tag[,tag]>      Logcat tag filter.
+  --level <level>        Minimum logcat level.
+  --grep <text>          Logcat substring filter.
+  --lines <n>            Logcat tail line count.
+  --since <time>         Passed to adb logcat -T.
+  --follow               Follow live logcat for a bounded duration.
+  --clear                Clear logcat before reading.
+  --force                Force hide-keyboard dismiss attempts.
+  --exact                Use exact text matching where supported.
+  --resource-id <id>     Permission dialog resource id.
+  --button-text <text>   Permission dialog button text.
+  --attempts <n>         Permission dialog tap attempts.
+  --streaming            Use streaming APK install.
+  --skip-flutter-launch  Skip Flutter launch during smoke.
   --help                 Show this help without touching ADB or the device.`;
 
 if (require.main === module) {
