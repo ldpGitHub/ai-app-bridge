@@ -4,6 +4,22 @@ This file records issues found while using ai-app-bridge as a development loop
 for real Android apps. Keep each item evidence-based and include the current
 workaround when one exists.
 
+## Default screenshot artifacts could dirty consuming repositories
+
+- Status: fixed in desktop CLI `0.1.23`
+- Found while using ai-app-bridge from consuming app repository roots.
+- Evidence: after desktop CLI `0.1.22` fixed stale screenshot filenames,
+  generated `screenshot` and `smoke` PNGs defaulted to
+  `<cwd>/ai_app_bridge_artifacts`. When `<cwd>` was an app repository root, this
+  created a new top-level directory that could show up as untracked git noise.
+- Impact: bridge-generated evidence files are temporary runtime artifacts, but
+  the default path made users clean their repository manually.
+- Fix: default generated artifacts now live under
+  `<cwd>/build/ai_app_bridge_artifacts`. Explicit `--out-file` and
+  `--artifact-dir` behavior is unchanged.
+- Verification: desktop CLI `npm run check` passed 29 tests, including coverage
+  for the default path and explicit override behavior.
+
 ## `wait-text` could match offstage Flutter widget dump text
 
 - Status: fixed in desktop CLI `0.1.20`
@@ -510,7 +526,7 @@ workaround when one exists.
   tree, log, report, trace, or MCP artifact with a reused default path can create
   the same false-current evidence risk.
 - Fix: `screenshot` and `smoke` now generate unique default PNG paths under
-  `ai_app_bridge_artifacts` when `--out-file` is omitted. Screenshot results
+  `build/ai_app_bridge_artifacts` when `--out-file` is omitted. Screenshot results
   include artifact metadata, MCP forwards `outFile` and `artifactDir` for
   screenshot/smoke flows, and MCP defaults generated artifacts to the MCP
   process working directory rather than the installed package `bin` directory.

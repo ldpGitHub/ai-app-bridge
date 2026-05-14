@@ -2065,7 +2065,7 @@ function screenshotOutputPath(options = {}, prefix = 'ai_app_bridge_screenshot')
 }
 
 function defaultArtifactPath(prefix, extension, options = {}) {
-  const directory = path.resolve(options.artifactDir || path.join(process.cwd(), 'ai_app_bridge_artifacts'));
+  const directory = path.resolve(options.artifactDir || defaultArtifactDirectory());
   const suffix = [
     artifactTimestamp(options.now || new Date()),
     String(options.pid || process.pid),
@@ -2169,6 +2169,10 @@ function sanitizeArtifactName(value) {
 
 function sanitizeArtifactExtension(value) {
   return sanitizeArtifactName(String(value || 'bin').replace(/^\.+/, '')) || 'bin';
+}
+
+function defaultArtifactDirectory() {
+  return path.join(process.cwd(), 'build', 'ai_app_bridge_artifacts');
 }
 
 function escapeRegExp(value) {
@@ -3979,6 +3983,7 @@ module.exports = {
   compactBridgeTree,
   compactStatus,
   compactUiaTree,
+  defaultArtifactDirectory,
   defaultArtifactPath,
   findFlutterNode,
   findTappableNodeByText,

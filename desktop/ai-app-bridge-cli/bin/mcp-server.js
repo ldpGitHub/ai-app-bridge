@@ -434,7 +434,7 @@ async function runSmoke(args) {
 function defaultArtifactDirFor(command, args) {
   if (args.outFile) return '';
   if (command !== 'screenshot' && command !== 'smoke') return '';
-  return path.join(process.cwd(), 'ai_app_bridge_artifacts');
+  return path.join(process.cwd(), 'build', 'ai_app_bridge_artifacts');
 }
 
 function addCommonArgs(cliArgs, args) {

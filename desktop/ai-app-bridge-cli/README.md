@@ -17,7 +17,8 @@ WebView network and console capture use Android WebView DevTools/CDP when the
 target app is debuggable and WebView debugging is enabled.
 
 When `screenshot` or `smoke` runs without `--out-file`, the CLI writes a unique
-PNG under `ai_app_bridge_artifacts` instead of reusing a stable filename.
+PNG under `build/ai_app_bridge_artifacts` instead of reusing a stable filename
+or creating files in the project root.
 It keeps the newest 20 generated screenshots for each command prefix. Use
 `--artifact-dir` to choose that directory, or `--out-file` when a fixed path is
 intentional.

@@ -11,6 +11,7 @@ const {
   compactBridgeTree,
   compactStatus,
   compactUiaTree,
+  defaultArtifactDirectory,
   defaultArtifactPath,
   defaultInstallerButtonTexts,
   findFlutterNode,
@@ -71,6 +72,11 @@ test('help command prints usage without probing adb', () => {
 });
 
 test('generated default artifact paths are unique and run-scoped', () => {
+  assert.equal(
+    path.relative(process.cwd(), defaultArtifactDirectory()),
+    path.join('build', 'ai_app_bridge_artifacts'),
+  );
+
   const first = defaultArtifactPath('ai app bridge screenshot', 'png', {
     artifactDir: path.join(os.tmpdir(), 'ai-app-bridge-artifact-test'),
     now: new Date('2026-05-12T10:11:12.123Z'),
@@ -91,6 +97,10 @@ test('generated default artifact paths are unique and run-scoped', () => {
 });
 
 test('screenshot default output path uses generated artifacts unless explicit', () => {
+  assert.equal(
+    path.dirname(screenshotOutputPath()),
+    path.resolve('build', 'ai_app_bridge_artifacts'),
+  );
   assert.match(
     screenshotOutputPath({ artifactDir: path.join(os.tmpdir(), 'ai-app-bridge-artifact-test') }),
     /ai_app_bridge_screenshot-\d{8}-\d{6}-\d{3}-\d+-[a-z0-9]+\.png$/,
