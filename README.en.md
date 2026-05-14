@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-## From “AI writes code” to “AI delivers verified changes”
+## From “AI writes code” to “AI delivers verified changes”, giving AI agents eyes and hands
 
 > **Before:** AI writes the code, then you still have to run the app, tap through flows, copy logs, inspect network traffic, and decide whether it worked.  
 > **Now:** AI can build and install the app, operate real flows, read real UI state, inspect network and logs, and verify the result itself.
