@@ -7,7 +7,7 @@
 > **以前：** AI 写完代码，你还要自己跑、自己点、自己抓日志、自己判断。  
 > **现在：** AI 写完代码，可以自己构建安装 App、自动操作 UI 功能路径、读取真实 UI 状态、检查网络和日志，并完成验收。
 
-AI App Bridge 让 AI agent 可以直接接入正在运行的 Android / Flutter 应用。它提供原生 UI / H5 操作、WebView、View tree / Widget tree / DOM、网络请求和运行日志等运行时能力，让 AI 不只看截图，也能基于真实状态自主迭代开发移动端。
+AI App Bridge 让 AI agent 可以直接接入正在运行的 Android / Flutter 应用。它提操作安卓 / flutter / H5 三端页面 ， 获取安卓 / flutter / H5 三端 View tree / Widget tree / DOM、网络请求和运行日志，让 AI 不只看截图，也能基于真实状态自主迭代开发移动端。
 
 它的核心目标是让 AI agent 按“观察 -> 操作 -> 读取结果 -> 验证 -> 继续迭代”的方式自主推进，而不是在缺少运行证据时猜测。
 
