@@ -34,6 +34,7 @@ Commands:
   input-text             Type text through ADB input.
   keyboard-state         Read Android soft keyboard visibility from dumpsys.
   hide-keyboard          Hide the Android soft keyboard when it is visible.
+  vbox-trace             Capture VirtualBox virtual-container diagnostics.
   install-apk            Install an APK and assist device-side installer screens.
   webview-pages          List attachable Android WebView DevTools/CDP pages.
   webview-network        Capture WebView Network events through CDP.
@@ -79,6 +80,9 @@ Options:
   --visible-only         Keep only visible/in-viewport compact tree nodes.
   --max-nodes <n>        Maximum compact tree nodes to return.
   --max-depth <n>        Maximum compact tree depth to scan.
+  --host-package-name <name>     VirtualBox host package for vbox-trace.
+  --virtual-package-name <name>  Virtual app package for vbox-trace.
+  --trace-tag <tag>      Logcat tag for vbox-trace. Defaults to VBOX-WXGRAY.
   --help                 Show this help without touching ADB or the device.`;
 
 if (require.main === module) {
@@ -220,6 +224,8 @@ async function runCommand(command, options, ctx) {
       return keyevent(ctx, Number(options.keyCode || 4));
     case 'logcat':
       return logcat(ctx, options);
+    case 'vbox-trace':
+      return vboxTrace(ctx, options);
     case 'permission-state':
       return permissionState(ctx, requiredString(options.permission, 'permission'));
     case 'permission-grant':
@@ -3422,6 +3428,214 @@ async function logcat(ctx, options) {
   return filterLogcat(text, { ...options, pid });
 }
 
+async function vboxTrace(ctx, options = {}) {
+  const hostPackageName = String(
+    options.hostPackageName ||
+    options.vboxPackage ||
+    options.packageName ||
+    'com.xyz.vbox',
+  );
+  const virtualPackageName = String(
+    options.virtualPackageName ||
+    options.virtualPackage ||
+    options.targetPackage ||
+    'com.tencent.mm',
+  );
+  const traceTag = String(options.traceTag || options.tag || 'VBOX-WXGRAY');
+  const artifactDir = options.artifactDir || path.join(process.cwd(), 'ai_app_bridge_artifacts');
+  const screenshotPath = options.outFile ||
+    defaultArtifactPath('ai_app_bridge_vbox_trace_screenshot', 'png', { artifactDir });
+  const traceCtx = {
+    ...ctx,
+    packageName: hostPackageName,
+    explicitPackageName: false,
+  };
+  const needles = vboxTraceNeedles(hostPackageName, virtualPackageName, traceTag);
+  const logText = await safeValue('logcat', async () => logcat(ctx, {
+    ...options,
+    tag: traceTag,
+    lines: options.lines || options.logcatLines || 800,
+    limitLines: options.limitLines || options.outputLines || 400,
+  }));
+  const logcatText = typeof logText === 'string' ? logText : '';
+  return {
+    ok: true,
+    command: 'vbox-trace',
+    hostPackageName,
+    virtualPackageName,
+    traceTag,
+    generatedAt: new Date().toISOString(),
+    device: await vboxDeviceInfo(ctx),
+    foreground: await safeValue('foreground', () => foregroundWindow(ctx)),
+    vboxDebugState: await vboxDebugState(ctx, hostPackageName, virtualPackageName),
+    processes: await adbFilteredLines(ctx, ['shell', 'ps', '-A'], needles, 80),
+    activity: await adbFilteredLines(ctx, ['shell', 'dumpsys', 'activity', 'activities'], needles, 220),
+    window: await adbFilteredLines(ctx, ['shell', 'dumpsys', 'window'], needles, 180),
+    uiaTree: await safeValue('uia-tree', () => uiaTreeCommand(ctx, {
+      ...options,
+      compact: true,
+      maxNodes: options.maxNodes || 80,
+      maxDepth: options.maxDepth || 12,
+    })),
+    screenshot: await safeValue('screenshot', () => screenshot(traceCtx, screenshotPath, {
+      ...options,
+      outFile: screenshotPath,
+      artifactPrefix: 'ai_app_bridge_vbox_trace_screenshot',
+    })),
+    logcat: {
+      ok: logText.ok !== false,
+      tag: traceTag,
+      lines: logcatText.split(/\r?\n/).filter(Boolean).length,
+      text: logcatText,
+      events: parseVboxTraceLog(logcatText),
+    },
+  };
+}
+
+async function vboxDebugState(ctx, hostPackageName, virtualPackageName) {
+  const uri = `content://${hostPackageName}.debug.vbox`;
+  return safeValue('vbox-debug-provider', async () => {
+    const output = (await adb(ctx, [
+      'shell',
+      'content',
+      'call',
+      '--uri',
+      uri,
+      '--method',
+      'dumpDebugState',
+      '--arg',
+      virtualPackageName,
+    ])).stdout.trim();
+    const jsonText = extractBundleJsonValue(output, 'json');
+    let parsed = null;
+    if (jsonText) {
+      parsed = JSON.parse(jsonText);
+    }
+    return {
+      ok: true,
+      uri,
+      method: 'dumpDebugState',
+      arg: virtualPackageName,
+      raw: output,
+      json: parsed,
+    };
+  });
+}
+
+async function vboxDeviceInfo(ctx) {
+  const [sdk, release, model] = await Promise.all([
+    safeValue('sdk', async () => (await adb(ctx, ['shell', 'getprop', 'ro.build.version.sdk'])).stdout.trim()),
+    safeValue('release', async () => (await adb(ctx, ['shell', 'getprop', 'ro.build.version.release'])).stdout.trim()),
+    safeValue('model', async () => (await adb(ctx, ['shell', 'getprop', 'ro.product.model'])).stdout.trim()),
+  ]);
+  return { sdk, release, model, serial: ctx.serial || '' };
+}
+
+function vboxTraceNeedles(hostPackageName, virtualPackageName, traceTag) {
+  return [
+    hostPackageName,
+    virtualPackageName,
+    traceTag,
+    'com.tencent.mm',
+    'LauncherUI',
+    'ShadowActivity',
+    'virtual_task',
+    'mCurrentFocus',
+    'mTopResumedActivity',
+    'mResumedActivity',
+    'mFocusedApp',
+  ].filter(Boolean);
+}
+
+function extractBundleJsonValue(raw, key) {
+  const marker = `${key}=`;
+  const markerIndex = String(raw || '').indexOf(marker);
+  if (markerIndex < 0) return '';
+  let index = markerIndex + marker.length;
+  while (/\s/.test(raw[index] || '')) index += 1;
+  if (raw[index] !== '{') return '';
+  const start = index;
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  for (; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaping = inString;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return raw.slice(start, index + 1);
+      }
+    }
+  }
+  return '';
+}
+
+async function adbFilteredLines(ctx, args, needles, maxLines) {
+  return safeValue(args.join(' '), async () => {
+    const raw = (await adb(ctx, args)).stdout;
+    const lines = filterInterestingLines(raw, needles, maxLines);
+    return {
+      ok: true,
+      command: `${ctx.adb} ${adbArgs(ctx, args).join(' ')}`,
+      matchedLines: lines.length,
+      lines,
+    };
+  });
+}
+
+async function safeValue(label, producer) {
+  try {
+    return await producer();
+  } catch (error) {
+    return {
+      ok: false,
+      source: label,
+      error: firstErrorLine(error),
+    };
+  }
+}
+
+function filterInterestingLines(raw, needles, maxLines = 200) {
+  const filters = (needles || []).map((needle) => String(needle).toLowerCase()).filter(Boolean);
+  const matched = String(raw || '').split(/\r?\n/).filter((line) => {
+    const normalized = line.toLowerCase();
+    return filters.some((needle) => normalized.includes(needle));
+  });
+  return maxLines > 0 && matched.length > maxLines ? matched.slice(-maxLines) : matched;
+}
+
+function parseVboxTraceLog(text) {
+  return String(text || '').split(/\r?\n/).map((line) => {
+    const parsed = parseLogcatLine(line);
+    if (!parsed || parsed.tag !== 'VBOX-WXGRAY') return null;
+    const phase = parsed.message.split(/\s+/, 1)[0] || '';
+    return {
+      pid: parsed.pid,
+      tid: parsed.tid,
+      priority: parsed.priority,
+      tag: parsed.tag,
+      phase,
+      message: parsed.message,
+      raw: line,
+    };
+  }).filter(Boolean);
+}
+
 async function permissionState(ctx, permission) {
   const result = await adb(ctx, ['shell', 'dumpsys', 'package', ctx.packageName]);
   const pattern = new RegExp(`${escapeRegExp(permission)}:\\s+granted=(true|false)(?:,\\s*flags=\\[([^\\]]*)\\])?`);
@@ -3980,6 +4194,7 @@ module.exports = {
   compactStatus,
   compactUiaTree,
   defaultArtifactPath,
+  extractBundleJsonValue,
   findFlutterNode,
   findTappableNodeByText,
   firstErrorLine,
