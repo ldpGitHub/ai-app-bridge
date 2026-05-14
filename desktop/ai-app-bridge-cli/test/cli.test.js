@@ -13,6 +13,7 @@ const {
   compactUiaTree,
   defaultArtifactPath,
   defaultInstallerButtonTexts,
+  extractBundleJsonValue,
   findFlutterNode,
   findTappableNodeByText,
   flutterNodePoint,
@@ -196,6 +197,13 @@ test('parses foreground package and activity from window dumpsys lines', () => {
   assert.equal(foreground.source, 'mCurrentFocus');
   assert.equal(foreground.packageName, 'com.example.reader');
   assert.equal(foreground.activity, 'com.example.reader.ui.activity.MainActivity');
+});
+
+test('extracts JSON objects from Android content call Bundle output', () => {
+  const output = 'Result: Bundle[{ok=true, json={"ok":true,"packageFilter":"com.tencent.mm","activityStack":{"tasks":[{"activities":[{"name":"LauncherUI","state":"RESUMED"}]}]}}}]';
+  const jsonText = extractBundleJsonValue(output, 'json');
+
+  assert.equal(JSON.parse(jsonText).activityStack.tasks[0].activities[0].name, 'LauncherUI');
 });
 
 test('tap-text candidate selection skips offscreen bridge nodes', () => {
